@@ -1,0 +1,6 @@
+# Only needed if you host the web app on Netlify instead of Vercel.
+# The API cannot run on Netlify — deploy it to Railway (see DEPLOY.md).
+[build]
+  base = "apps/web"
+  command = "npm run build"
+  publish = ".next"

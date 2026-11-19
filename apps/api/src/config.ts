@@ -30,7 +30,8 @@ export interface BankDetails {
 export const config = {
   env: env('NODE_ENV', 'development'),
   isProd: env('NODE_ENV', 'development') === 'production',
-  port: Number(env('API_PORT', '4000')),
+  // PaaS hosts (Railway, Render, Fly) inject PORT
+  port: Number(process.env.PORT || env('API_PORT', '4000')),
   webUrl: env('WEB_URL', 'http://localhost:3000'),
   redisUrl: env('REDIS_URL', 'redis://localhost:6379'),
   jwtSecret: env('JWT_SECRET'),
