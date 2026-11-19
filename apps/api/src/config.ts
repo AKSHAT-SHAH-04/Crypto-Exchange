@@ -49,7 +49,7 @@ export const config = {
   emailFrom: env('EMAIL_FROM', 'Exchange <no-reply@example.com>'),
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
-  brand: env('NEXT_PUBLIC_BRAND_NAME', 'Crypto Exchange'),
+  brand: env('NEXT_PUBLIC_BRAND_NAME', 'Zentra'),
 
   // ---------- jurisdictions ----------
   /** If set, only residents of these ISO-2 countries can complete KYC. */

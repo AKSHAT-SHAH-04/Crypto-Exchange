@@ -8,7 +8,7 @@ import { Footer } from '@/components/Footer';
 import { I18nProvider } from '@/lib/i18n';
 
 const sans = Inter({ subsets: ['latin'], variable: '--font-sans' });
-const brand = process.env.NEXT_PUBLIC_BRAND_NAME || 'Crypto Exchange';
+const brand = process.env.NEXT_PUBLIC_BRAND_NAME || 'Zentra';
 
 export const metadata: Metadata = {
   title: { default: `${brand} — Trade crypto`, template: `%s | ${brand}` },

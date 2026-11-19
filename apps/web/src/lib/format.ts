@@ -37,4 +37,4 @@ export function floorStr(n: number, dp: number) {
 }
 
 export const pairLabel = (base: string, quote: string) => `${base}/${quote}`;
-export const brand = process.env.NEXT_PUBLIC_BRAND_NAME || 'Crypto Exchange';
+export const brand = process.env.NEXT_PUBLIC_BRAND_NAME || 'Zentra';

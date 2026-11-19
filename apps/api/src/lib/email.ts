@@ -15,10 +15,10 @@ export async function sendEmail(to: string, subject: string, html: string) {
 
 const layout = (title: string, body: string, cta?: { href: string; label: string }) => `
 <div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;background:#0b0e11;color:#eaecef;border-radius:8px">
-  <h2 style="color:#7c5cff;margin-top:0">${config.brand}</h2>
+  <h2 style="color:#0071e3;margin-top:0">${config.brand}</h2>
   <h3>${title}</h3>
   <p>${body}</p>
-  ${cta ? `<p><a href="${cta.href}" style="display:inline-block;background:#7c5cff;color:#ffffff;padding:10px 18px;border-radius:4px;text-decoration:none;font-weight:bold">${cta.label}</a></p><p style="font-size:12px;color:#848e9c">Or open: ${cta.href}</p>` : ''}
+  ${cta ? `<p><a href="${cta.href}" style="display:inline-block;background:#0071e3;color:#ffffff;padding:10px 18px;border-radius:4px;text-decoration:none;font-weight:bold">${cta.label}</a></p><p style="font-size:12px;color:#848e9c">Or open: ${cta.href}</p>` : ''}
   <p style="font-size:12px;color:#848e9c">If you didn't request this, you can ignore this email.</p>
 </div>`;
 

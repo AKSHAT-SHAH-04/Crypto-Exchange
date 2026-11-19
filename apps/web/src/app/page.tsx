@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import clsx from 'clsx';
 import { MarketTable } from '@/components/MarketTable';
+import { ZentraMark } from '@/components/Logo';
 import { useAuth } from '@/lib/auth';
 import { useT } from '@/lib/i18n';
 import { api } from '@/lib/api';
@@ -328,6 +329,7 @@ export default function Home() {
       {/* ---------- Final CTA ---------- */}
       <section className="px-6 pb-12 pt-8 text-center">
         <Reveal>
+          <ZentraMark size={72} className="mx-auto mb-6 drop-shadow-[0_12px_30px_rgba(94,92,230,0.35)]" />
           <h2 className="headline text-5xl sm:text-6xl">Start in minutes.</h2>
           <p className="mx-auto mt-4 max-w-xl text-lg text-muted">Create an account, verify your identity, and make your first trade — all from your phone or desktop.</p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">

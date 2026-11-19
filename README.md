@@ -1,4 +1,6 @@
-# Crypto Exchange
+<p align="center"><img src="apps/web/public/brand/zentra-logo.svg" alt="Zentra" width="220"></p>
+
+# Zentra
 
 A full-stack spot crypto exchange: live markets, pro trading screen, an in-house matching engine, wallets, 2FA, KYC, user API keys and an admin console.
 
