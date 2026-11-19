@@ -17,6 +17,8 @@ const orderSchema = z
     price: num.optional(),
     stopPrice: num.optional(),
     trailingDelta: num.optional(),
+    timeInForce: z.enum(['GTC', 'IOC', 'FOK']).optional(),
+    postOnly: z.boolean().optional(),
   })
   .refine((o) => o.type === 'MARKET' || !!o.price, { message: 'Price is required', path: ['price'] })
   .refine((o) => o.type !== 'STOP_LIMIT' || !!o.stopPrice, { message: 'Stop price is required', path: ['stopPrice'] })

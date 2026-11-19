@@ -34,11 +34,13 @@ export function MarketTable({ limit, compact }: { limit?: number; compact?: bool
   const { favs, toggle } = useFavorites();
   const [q, setQ] = useState('');
   const [tab, setTab] = useState<'all' | 'fav' | 'gainers' | 'losers'>('all');
+  const [quote, setQuote] = useState<'ALL' | 'USDT' | 'BTC'>('ALL');
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'quoteVolume', dir: -1 });
 
   const rows = useMemo(() => {
     let list = markets.map((m) => ({ ...m, t: tickers[m.symbol] ?? m.ticker }));
     if (q) list = list.filter((m) => m.symbol.includes(q.toUpperCase().replace('/', '')));
+    if (quote !== 'ALL') list = list.filter((m) => m.quote === quote);
     if (tab === 'fav') list = list.filter((m) => favs.includes(m.symbol));
     if (tab === 'gainers') list = list.filter((m) => (m.t?.changePct ?? 0) > 0);
     if (tab === 'losers') list = list.filter((m) => (m.t?.changePct ?? 0) < 0);
@@ -49,7 +51,7 @@ export function MarketTable({ limit, compact }: { limit?: number; compact?: bool
       return (av > bv ? 1 : av < bv ? -1 : 0) * s.dir;
     });
     return limit ? list.slice(0, limit) : list;
-  }, [markets, tickers, q, tab, favs, sort, limit]);
+  }, [markets, tickers, q, tab, favs, sort, limit, quote]);
 
   const head = (key: SortKey, label: string, cls = '') => (
     <th className={clsx('table-head cursor-pointer select-none px-3 py-2 hover:text-fg', cls)} onClick={() => setSort((s) => ({ key, dir: s.key === key ? (-s.dir as 1 | -1) : -1 }))}>
@@ -68,7 +70,14 @@ export function MarketTable({ limit, compact }: { limit?: number; compact?: bool
               </button>
             ))}
           </div>
-          <input className="input sm:ml-auto sm:w-64" placeholder="Search coin (e.g. BTC)" value={q} onChange={(e) => setQ(e.target.value)} />
+          <div className="flex gap-1 rounded-full bg-panel2 p-1 text-xs sm:ml-auto">
+            {(['ALL', 'USDT', 'BTC'] as const).map((qq) => (
+              <button key={qq} onClick={() => setQuote(qq)} className={clsx('rounded-full px-3 py-1 font-medium transition', quote === qq ? 'bg-panel text-fg shadow-sm' : 'text-muted hover:text-fg')}>
+                {qq === 'ALL' ? 'All' : qq}
+              </button>
+            ))}
+          </div>
+          <input className="input sm:w-64" placeholder="Search coin (e.g. BTC)" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
       )}
       <div className="overflow-x-auto">

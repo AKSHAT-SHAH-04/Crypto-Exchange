@@ -15,6 +15,8 @@ const apiUrl = process.env.API_INTERNAL_URL || 'http://localhost:4000';
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // NEXT_DIST_DIR lets CI/verification builds write elsewhere than a running `next dev` (.next)
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   env: {
     NEXT_PUBLIC_BRAND_NAME: process.env.NEXT_PUBLIC_BRAND_NAME || 'Zentra',
     NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:4000/ws',

@@ -25,9 +25,30 @@ export const passwordSchema = z
 const strictLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 
 /** Creates a user with the paper-trading signup bonus. */
-export async function createUser(data: { email: string; name?: string | null; passwordHash?: string; googleId?: string; emailVerified?: boolean }) {
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+export function newReferralCode() {
+  const bytes = randomToken(8);
+  return Array.from({ length: 8 }, (_, i) => CODE_ALPHABET[parseInt(bytes.slice(i * 2, i * 2 + 2), 16) % CODE_ALPHABET.length]).join('');
+}
+
+/** Resolves a referral code to the referrer's id (ignores unknown codes and sub-accounts). */
+export async function referrerFromCode(code: string | undefined | null) {
+  if (!code || !/^[A-Z0-9]{6,12}$/i.test(code)) return null;
+  const r = await prisma.user.findUnique({ where: { referralCode: code.toUpperCase() }, select: { id: true, parentId: true, frozen: true } });
+  return r && !r.parentId && !r.frozen ? r.id : null;
+}
+
+export async function createUser(data: { email: string; name?: string | null; passwordHash?: string; googleId?: string; emailVerified?: boolean; referredById?: string | null }) {
   return prisma.$transaction(async (tx) => {
-    const user = await tx.user.create({ data });
+    let user = null;
+    for (let i = 0; i < 5 && !user; i++) {
+      try {
+        user = await tx.user.create({ data: { ...data, referralCode: newReferralCode() } });
+      } catch (e: any) {
+        if (e?.code !== 'P2002' || !String(e?.meta?.target ?? '').includes('referralCode')) throw e;
+      }
+    }
+    if (!user) throw new Error('Could not allocate a referral code');
     if (config.tradingMode === 'paper') {
       const amount = new D(config.signupBonus);
       await tx.balance.create({ data: { userId: user.id, asset: 'USDT', available: amount } });
@@ -50,14 +71,15 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post('/api/auth/register', strictLimit, async (req, reply) => {
     const body = z
-      .object({ email: z.string().email().max(200), password: passwordSchema, name: z.string().trim().max(80).optional() })
+      .object({ email: z.string().email().max(200), password: passwordSchema, name: z.string().trim().max(80).optional(), ref: z.string().trim().max(20).optional() })
       .parse(req.body);
     const email = body.email.toLowerCase();
     if (await prisma.user.findUnique({ where: { email } })) throw badRequest('An account with this email already exists');
-    const user = await createUser({ email, name: body.name || null, passwordHash: await bcrypt.hash(body.password, 12) });
+    const referredById = await referrerFromCode(body.ref);
+    const user = await createUser({ email, name: body.name || null, passwordHash: await bcrypt.hash(body.password, 12), referredById });
     const token = await issueToken(user.id, 'VERIFY_EMAIL', 60 * 24);
     await emails.verify(email, token);
-    await audit(req, user.id, 'auth.register');
+    await audit(req, user.id, 'auth.register', referredById ? { referredBy: referredById } : undefined);
     setSession(reply, user);
     return { user: publicUser(user) };
   });
@@ -204,7 +226,9 @@ export async function authRoutes(app: FastifyInstance) {
 
     let user = await prisma.user.findFirst({ where: { OR: [{ googleId: info.sub }, { email: info.email.toLowerCase() }] } });
     if (!user) {
-      user = await createUser({ email: info.email.toLowerCase(), name: info.name, googleId: info.sub, emailVerified: true });
+      // referral code stashed in a cookie by the sign-up page before the Google redirect
+      user = await createUser({ email: info.email.toLowerCase(), name: info.name, googleId: info.sub, emailVerified: true, referredById: await referrerFromCode(req.cookies.cx_ref) });
+      reply.clearCookie('cx_ref', { path: '/' });
       await audit(req, user.id, 'auth.register', { via: 'google' });
     } else if (!user.googleId) {
       if (!user.emailVerified) {

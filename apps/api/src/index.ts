@@ -36,6 +36,9 @@ import { rampRoutes } from './routes/ramp.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { initTreasury } from './lib/treasury.js';
 import { startFx } from './lib/fx.js';
+import { referralRoutes } from './routes/referral.js';
+import { earnRoutes } from './routes/earn.js';
+import { autoInvestRoutes } from './routes/autoinvest.js';
 
 const app = Fastify({
   logger: { level: config.isProd ? 'info' : 'warn' },
@@ -132,6 +135,9 @@ await app.register(p2pRoutes);
 await app.register(fiatRoutes);
 await app.register(rampRoutes);
 await app.register(webhookRoutes);
+await app.register(referralRoutes);
+await app.register(earnRoutes);
+await app.register(autoInvestRoutes);
 
 await initTreasury();
 startFx();

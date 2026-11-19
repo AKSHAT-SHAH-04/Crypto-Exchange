@@ -9,7 +9,7 @@ import { api, errMsg } from '@/lib/api';
 import { useApi } from '@/lib/hooks';
 import { fmt, fmtDateTime, fmtQty } from '@/lib/format';
 
-type Tab = 'dashboard' | 'users' | 'kyc' | 'withdrawals' | 'fiat' | 'p2p' | 'support' | 'markets' | 'announcements' | 'audit';
+type Tab = 'dashboard' | 'users' | 'kyc' | 'withdrawals' | 'fiat' | 'earn' | 'p2p' | 'support' | 'markets' | 'announcements' | 'audit';
 
 function useAction() {
   const toast = useToast();
@@ -518,6 +518,48 @@ function FiatOps() {
   );
 }
 
+function EarnAdmin() {
+  const act = useAction();
+  const list = useApi<any[]>('/api/admin/earn/products');
+  const [f, setF] = useState({ asset: 'USDT', type: 'FLEXIBLE', durationDays: '0', apr: '0.05', minAmount: '10', capacity: '' });
+  const [aprs, setAprs] = useState<Record<string, string>>({});
+  return (
+    <div className="space-y-4">
+      <div className="card flex flex-wrap items-end gap-2 p-4">
+        <Field label="Asset"><input className="input w-24" value={f.asset} onChange={(e) => setF({ ...f, asset: e.target.value.toUpperCase() })} /></Field>
+        <Field label="Type"><select className="input w-32" value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}><option>FLEXIBLE</option><option>LOCKED</option></select></Field>
+        <Field label="Days"><input className="input w-20" value={f.durationDays} onChange={(e) => setF({ ...f, durationDays: e.target.value })} /></Field>
+        <Field label="APR (0.05 = 5%)"><input className="input w-28" value={f.apr} onChange={(e) => setF({ ...f, apr: e.target.value })} /></Field>
+        <Field label="Min"><input className="input w-24" value={f.minAmount} onChange={(e) => setF({ ...f, minAmount: e.target.value })} /></Field>
+        <Field label="Capacity (blank = ∞)"><input className="input w-32" value={f.capacity} onChange={(e) => setF({ ...f, capacity: e.target.value })} /></Field>
+        <button className="btn-brand" onClick={() => act(() => api('/api/admin/earn/products', { method: 'POST', body: { ...f, capacity: f.capacity ? f.capacity : null } }), 'Product created', list.reload)}>Add product</button>
+      </div>
+      <div className="card overflow-x-auto">
+        <table className="w-full min-w-[760px] text-sm">
+          <Th cols={['Product', 'APR', 'Subscribed', 'Positions', 'Capacity', 'Status', '']} />
+          <tbody>
+            {list.data?.map((p) => (
+              <tr key={p.id} className="border-b border-line/50 last:border-0">
+                <td className="px-4 py-2 font-medium">{p.asset} <span className="text-xs text-muted">{p.type === 'FLEXIBLE' ? 'Flexible' : `${p.durationDays}d locked`}</span></td>
+                <td className="px-4"><input className="input num w-24 py-1" value={aprs[p.id] ?? p.apr} onChange={(e) => setAprs({ ...aprs, [p.id]: e.target.value })} /></td>
+                <td className="num px-4">{fmtQty(p.subscribed, 8)}</td>
+                <td className="num px-4">{p.positions}</td>
+                <td className="num px-4">{p.capacity ? fmtQty(p.capacity, 2) : '∞'}</td>
+                <td className="px-4"><StatusBadge status={p.enabled ? 'APPROVED' : 'CANCELED'} /></td>
+                <td className="whitespace-nowrap px-4 text-right text-xs">
+                  {aprs[p.id] !== undefined && aprs[p.id] !== p.apr && <button className="mr-3 text-brand" onClick={() => act(() => api(`/api/admin/earn/products/${p.id}`, { method: 'PATCH', body: { apr: aprs[p.id] } }), 'APR updated (new subscriptions)', list.reload)}>Save APR</button>}
+                  <button className={p.enabled ? 'text-down' : 'text-up'} onClick={() => act(() => api(`/api/admin/earn/products/${p.id}`, { method: 'PATCH', body: { enabled: !p.enabled } }), p.enabled ? 'Product hidden' : 'Product enabled', list.reload)}>{p.enabled ? 'Disable' : 'Enable'}</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-muted">Interest is paid from the treasury. In live mode it must hold enough of each asset, and the yield must come from a real source.</p>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('dashboard');
   return (
@@ -534,6 +576,7 @@ export default function AdminPage() {
             { id: 'kyc', label: 'KYC' },
             { id: 'withdrawals', label: 'Withdrawals' },
             { id: 'fiat', label: 'Fiat & bank' },
+            { id: 'earn', label: 'Earn' },
             { id: 'p2p', label: 'P2P disputes' },
             { id: 'support', label: 'Support' },
             { id: 'markets', label: 'Markets & fees' },
@@ -546,6 +589,7 @@ export default function AdminPage() {
         {tab === 'kyc' && <KycQueue />}
         {tab === 'withdrawals' && <Withdrawals />}
         {tab === 'fiat' && <FiatOps />}
+        {tab === 'earn' && <EarnAdmin />}
         {tab === 'p2p' && <P2PDisputes />}
         {tab === 'support' && <SupportInbox />}
         {tab === 'markets' && <Markets />}

@@ -11,7 +11,7 @@ export type Lang = (typeof LANGUAGES)[number]['code'];
 type Dict = Record<string, string>;
 
 const en: Dict = {
-  'nav.markets': 'Markets', 'nav.trade': 'Trade', 'nav.convert': 'Convert', 'nav.p2p': 'P2P', 'nav.wallet': 'Wallet', 'nav.orders': 'Orders',
+  'nav.markets': 'Markets', 'nav.trade': 'Trade', 'nav.convert': 'Convert', 'nav.p2p': 'P2P', 'nav.earn': 'Earn', 'nav.autoinvest': 'Auto-Invest', 'nav.referral': 'Referral', 'nav.wallet': 'Wallet', 'nav.orders': 'Orders',
   'nav.admin': 'Admin', 'nav.account': 'Account', 'nav.subaccounts': 'Sub-accounts', 'nav.support': 'Support', 'nav.announcements': 'Announcements',
   'nav.notifications': 'Notifications', 'nav.fees': 'Fees', 'nav.login': 'Log in', 'nav.signup': 'Sign up', 'nav.logout': 'Log out',
   'banner.paper': 'Paper trading mode — all funds are demo funds. Prices mirror the live market.',
@@ -30,7 +30,7 @@ const en: Dict = {
 };
 
 const hi: Dict = {
-  'nav.markets': 'मार्केट्स', 'nav.trade': 'ट्रेड', 'nav.convert': 'कन्वर्ट', 'nav.p2p': 'P2P', 'nav.wallet': 'वॉलेट', 'nav.orders': 'ऑर्डर्स',
+  'nav.markets': 'मार्केट्स', 'nav.trade': 'ट्रेड', 'nav.convert': 'कन्वर्ट', 'nav.p2p': 'P2P', 'nav.earn': 'अर्न', 'nav.autoinvest': 'ऑटो-इन्वेस्ट', 'nav.referral': 'रेफ़रल', 'nav.wallet': 'वॉलेट', 'nav.orders': 'ऑर्डर्स',
   'nav.admin': 'एडमिन', 'nav.account': 'खाता', 'nav.subaccounts': 'सब-अकाउंट्स', 'nav.support': 'सहायता', 'nav.announcements': 'घोषणाएँ',
   'nav.notifications': 'सूचनाएँ', 'nav.fees': 'शुल्क', 'nav.login': 'लॉग इन', 'nav.signup': 'साइन अप', 'nav.logout': 'लॉग आउट',
   'banner.paper': 'पेपर ट्रेडिंग मोड — सभी फंड डेमो हैं। कीमतें लाइव मार्केट जैसी हैं।',
@@ -49,7 +49,7 @@ const hi: Dict = {
 };
 
 const es: Dict = {
-  'nav.markets': 'Mercados', 'nav.trade': 'Operar', 'nav.convert': 'Convertir', 'nav.p2p': 'P2P', 'nav.wallet': 'Billetera', 'nav.orders': 'Órdenes',
+  'nav.markets': 'Mercados', 'nav.trade': 'Operar', 'nav.convert': 'Convertir', 'nav.p2p': 'P2P', 'nav.earn': 'Earn', 'nav.autoinvest': 'Inversión automática', 'nav.referral': 'Referidos', 'nav.wallet': 'Billetera', 'nav.orders': 'Órdenes',
   'nav.admin': 'Admin', 'nav.account': 'Cuenta', 'nav.subaccounts': 'Subcuentas', 'nav.support': 'Soporte', 'nav.announcements': 'Anuncios',
   'nav.notifications': 'Notificaciones', 'nav.fees': 'Comisiones', 'nav.login': 'Iniciar sesión', 'nav.signup': 'Registrarse', 'nav.logout': 'Cerrar sesión',
   'banner.paper': 'Modo de práctica: todos los fondos son de demostración. Los precios reflejan el mercado real.',

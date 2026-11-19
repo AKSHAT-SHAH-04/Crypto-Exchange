@@ -22,7 +22,12 @@ export interface FeeProfile {
   takerMult: number;
   payWithToken: boolean;
   volume30d: number;
+  /** Who referred this user (earns a share of their trading fees) */
+  referrerId: string | null;
 }
+
+/** Share of a referee's trading fee paid to their referrer. */
+export const REFERRAL_RATE = Number(process.env.REFERRAL_COMMISSION_RATE || '0.2');
 
 const cache = new Map<string, { at: number; p: FeeProfile }>();
 const TTL = 5 * 60_000;
@@ -43,11 +48,11 @@ export async function getFeeProfile(userId: string, fresh = false): Promise<FeeP
   const hit = cache.get(userId);
   if (!fresh && hit && Date.now() - hit.at < TTL) return hit.p;
   const [user, vol] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { payFeesWithToken: true, vipOverride: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { payFeesWithToken: true, vipOverride: true, referredById: true } }),
     volume30d(userId),
   ]);
   const t = tierFor(vol, user?.vipOverride);
-  const p = { level: t.level, makerMult: t.makerMult, takerMult: t.takerMult, payWithToken: !!user?.payFeesWithToken, volume30d: vol };
+  const p = { level: t.level, makerMult: t.makerMult, takerMult: t.takerMult, payWithToken: !!user?.payFeesWithToken, volume30d: vol, referrerId: user?.referredById ?? null };
   cache.set(userId, { at: Date.now(), p });
   return p;
 }

@@ -23,7 +23,7 @@ import { badRequest, notFound } from '../lib/errors.js';
 import { notify } from '../lib/notify.js';
 import { pushTrade, onPrice, getPrice } from '../market/feed.js';
 import { OrderBook, nextSeq, type Fill, type Side } from './orderbook.js';
-import { FEE_TOKEN, FEE_TOKEN_DISCOUNT, getFeeProfile } from './fees.js';
+import { FEE_TOKEN, FEE_TOKEN_DISCOUNT, REFERRAL_RATE, getFeeProfile } from './fees.js';
 import { getTreasuryId } from '../lib/treasury.js';
 import { config } from '../config.js';
 import { isPriceFresh } from '../market/feed.js';
@@ -229,11 +229,6 @@ async function settle(tx: Tx, pair: Pair, taker: Taker, fills: Fill[]): Promise<
       }
     }
 
-    // fees are revenue: move them to the house account so the ledger stays balanced
-    for (const fee of [buyerFee, sellerFee]) {
-      if (fee.amount.gt(0)) await adjustBalance(tx, getTreasuryId(), fee.asset, fee.amount);
-    }
-
     const trade = await tx.trade.create({
       data: {
         symbol: pair.symbol, price: f.price, quantity: f.qty, takerSide: taker.side,
@@ -243,6 +238,26 @@ async function settle(tx: Tx, pair: Pair, taker: Taker, fills: Fill[]): Promise<
         feeUsd: new D(buyerFee.usd + sellerFee.usd),
       },
     });
+    // Fees are revenue: the payer's referrer (if any) gets REFERRAL_RATE of it, the house keeps the rest,
+    // so the ledger stays balanced.
+    for (const [payerId, fee] of [[buyer.userId, buyerFee], [seller.userId, sellerFee]] as const) {
+      if (!payerId || fee.amount.lte(0)) continue;
+      const p = await profile(payerId);
+      let houseShare = fee.amount;
+      if (p.referrerId && REFERRAL_RATE > 0) {
+        const commission = fee.amount.mul(REFERRAL_RATE).toDecimalPlaces(18, D.ROUND_DOWN);
+        if (commission.gt(0)) {
+          houseShare = fee.amount.minus(commission);
+          await adjustBalance(tx, p.referrerId, fee.asset, commission);
+          await tx.referralReward.create({
+            data: { referrerId: p.referrerId, refereeId: payerId, asset: fee.asset, amount: commission, usdValue: new D(fee.usd * REFERRAL_RATE), tradeId: trade.id },
+          });
+          res.touchedUsers.add(p.referrerId);
+        }
+      }
+      if (houseShare.gt(0)) await adjustBalance(tx, getTreasuryId(), fee.asset, houseShare);
+    }
+
     res.trades.push({ id: trade.id, price: f.price, qty: f.qty, createdAt: trade.createdAt });
     res.filled = res.filled.plus(f.qty);
     res.quote = res.quote.plus(quote);
@@ -309,6 +324,10 @@ export interface PlaceOrderInput {
   stopPrice?: string;
   /** TRAILING_STOP callback rate as a fraction, e.g. "0.01" for 1% */
   trailingDelta?: string;
+  /** LIMIT only: GTC (default) rests on the book, IOC cancels the unfilled rest, FOK fills fully or not at all */
+  timeInForce?: 'GTC' | 'IOC' | 'FOK';
+  /** LIMIT only: reject instead of trading immediately (guarantees maker fee) */
+  postOnly?: boolean;
 }
 
 const dec = (v: string | undefined, name: string) => {
@@ -385,6 +404,17 @@ export function placeOrder(userId: string, input: PlaceOrderInput) {
     }
     if (notional.lt(pair.minNotional)) throw badRequest(`Order value must be at least ${pair.minNotional} ${pair.quote}`);
 
+    const tif = input.type === 'LIMIT' ? input.timeInForce ?? 'GTC' : 'GTC';
+    const postOnly = input.type === 'LIMIT' && !!input.postOnly;
+    if (input.type !== 'LIMIT' && (input.postOnly || (input.timeInForce && input.timeInForce !== 'GTC'))) {
+      throw badRequest('Time-in-force and post-only apply to limit orders only');
+    }
+    if (postOnly && tif !== 'GTC') throw badRequest('Post-only orders must be good-till-canceled');
+    if (postOnly && fills.length) throw badRequest('Post-only order would trade immediately — pick a price that rests on the book');
+    if (tif === 'FOK' && fills.reduce((s, f) => s.plus(f.qty), ZERO).lt(qty)) {
+      throw badRequest('Fill-or-kill order could not be filled completely at this price');
+    }
+
     const lockAsset = input.side === 'BUY' ? pair.quote : pair.base;
     const lockAmt = input.side === 'BUY' ? notional : qty;
     const lockPrice = input.side === 'BUY' && price ? price : null;
@@ -396,7 +426,7 @@ export function placeOrder(userId: string, input: PlaceOrderInput) {
           data: {
             userId, symbol, side: input.side, type: input.type,
             status: conditional ? 'PENDING_TRIGGER' : 'OPEN',
-            price, stopPrice, trailingDelta, quantity: qty, lockPrice,
+            price, stopPrice, trailingDelta, quantity: qty, lockPrice, timeInForce: tif, postOnly,
           },
         });
         if (conditional) return { order, result: null };
@@ -490,11 +520,16 @@ async function finalizeTaker(tx: Tx, pair: Pair, order: Order, r: SettleResult) 
   const filled = order.filledQty.plus(r.filled);
   const full = filled.gte(order.quantity);
   let status: Order['status'];
-  if (order.type === 'MARKET') {
+  // Market, IOC and FOK orders never rest: cancel and unlock whatever didn't fill.
+  if (order.type === 'MARKET' || order.timeInForce !== 'GTC') {
     status = full ? 'FILLED' : 'CANCELED';
-    if (!full && order.side === 'SELL') {
+    if (!full) {
       const rest = order.quantity.minus(filled);
-      await adjustBalance(tx, order.userId, pair.base, rest, rest.neg());
+      if (order.side === 'SELL') await adjustBalance(tx, order.userId, pair.base, rest, rest.neg());
+      else if (order.lockPrice) {
+        const rel = rest.mul(order.lockPrice);
+        await adjustBalance(tx, order.userId, pair.quote, rel, rel.neg());
+      }
     }
   } else status = full ? 'FILLED' : filled.gt(0) ? 'PARTIALLY_FILLED' : 'OPEN';
   return tx.order.update({

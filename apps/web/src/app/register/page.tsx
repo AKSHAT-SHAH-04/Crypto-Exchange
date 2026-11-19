@@ -1,18 +1,23 @@
 'use client';
-import { useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { AuthCard, FormError } from '@/components/AuthCard';
 import { Field } from '@/components/Field';
 import { api, errMsg } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useT } from '@/lib/i18n';
 
-export default function Register() {
+function Register() {
   const router = useRouter();
   const { refresh, googleEnabled, tradingMode } = useAuth();
   const { t } = useT();
+  const ref = (useSearchParams().get('ref') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
   const [form, setForm] = useState({ name: '', email: '', password: '' });
+  // keep the referral code for Google sign-up (read server-side in the OAuth callback)
+  useEffect(() => {
+    if (ref) document.cookie = `cx_ref=${ref}; path=/; max-age=3600; samesite=lax`;
+  }, [ref]);
   const [agree, setAgree] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -29,7 +34,7 @@ export default function Register() {
     setBusy(true);
     setError(null);
     try {
-      await api('/api/auth/register', { method: 'POST', body: form });
+      await api('/api/auth/register', { method: 'POST', body: { ...form, ...(ref ? { ref } : {}) } });
       await refresh();
       router.push('/wallet?welcome=1');
     } catch (e) {
@@ -42,6 +47,7 @@ export default function Register() {
   return (
     <AuthCard title={t('auth.register')} subtitle={tradingMode === 'paper' ? t('home.bonus') : undefined}>
       <form onSubmit={submit} className="space-y-4">
+        {ref && <div className="rounded-xl bg-up/10 px-3 py-2 text-sm text-up">You were invited by a friend · code <b className="num">{ref}</b></div>}
         <FormError error={error} />
         <Field label={t('auth.name')}>
           <input className="input" autoComplete="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
@@ -70,5 +76,13 @@ export default function Register() {
         </p>
       </form>
     </AuthCard>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense>
+      <Register />
+    </Suspense>
   );
 }

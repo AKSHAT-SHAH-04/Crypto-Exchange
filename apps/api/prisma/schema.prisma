@@ -42,6 +42,17 @@ enum TxType {
   TRANSFER
   P2P
   CONVERT
+  EARN
+  REFERRAL
+}
+
+enum TimeInForce {
+  /// Good-till-canceled: rests on the book
+  GTC
+  /// Immediate-or-cancel: fill what's possible now, cancel the rest
+  IOC
+  /// Fill-or-kill: fill entirely now or not at all
+  FOK
 }
 
 enum TxStatus {
@@ -92,6 +103,9 @@ model User {
   subLabel        String?
   /// ISO-3166 alpha-2 country of residence, set from KYC
   country         String?
+  /// Shareable code others sign up with
+  referralCode    String?   @unique
+  referredById    String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -105,6 +119,8 @@ model User {
   depositAddresses DepositAddress[]
   bankAccounts    BankAccount[]
   rampOrders      RampOrder[]
+  earnPositions   EarnPosition[]
+  autoInvestPlans AutoInvestPlan[]
   p2pAds          P2PAd[]
 
   balances        Balance[]
@@ -173,6 +189,9 @@ model Order {
   ocoId       String?
   /// Trailing stop callback rate as a fraction (0.01 = 1%)
   trailingDelta Decimal?  @db.Decimal(10, 6)
+  timeInForce TimeInForce @default(GTC)
+  /// Maker-only: rejected if it would trade immediately
+  postOnly    Boolean     @default(false)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
   user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -577,4 +596,125 @@ model RampOrder {
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+}
+
+// ---------------- Referral ----------------
+
+/// Commission paid to a referrer out of the trading fee their referee paid.
+model ReferralReward {
+  id         String   @id @default(cuid())
+  referrerId String
+  refereeId  String
+  asset      String
+  amount     Decimal  @db.Decimal(36, 18)
+  usdValue   Decimal  @default(0) @db.Decimal(36, 18)
+  tradeId    String?
+  createdAt  DateTime @default(now())
+
+  @@index([referrerId, createdAt])
+  @@index([refereeId])
+}
+
+// ---------------- Simple Earn ----------------
+
+enum EarnType {
+  FLEXIBLE
+  LOCKED
+}
+
+enum EarnStatus {
+  ACTIVE
+  REDEEMED
+}
+
+model EarnProduct {
+  id           String         @id @default(cuid())
+  asset        String
+  type         EarnType
+  /// Lock period for LOCKED products
+  durationDays Int            @default(0)
+  /// Annual percentage rate as a fraction (0.05 = 5%)
+  apr          Decimal        @db.Decimal(10, 6)
+  minAmount    Decimal        @default(0) @db.Decimal(36, 18)
+  /// Total the product will accept across all users (null = unlimited)
+  capacity     Decimal?       @db.Decimal(36, 18)
+  enabled      Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  positions    EarnPosition[]
+
+  @@index([enabled, asset])
+}
+
+model EarnPosition {
+  id            String      @id @default(cuid())
+  userId        String
+  productId     String
+  amount        Decimal     @db.Decimal(36, 18)
+  /// APR locked in at subscription
+  apr           Decimal     @db.Decimal(10, 6)
+  status        EarnStatus  @default(ACTIVE)
+  /// Interest paid out so far
+  earned        Decimal     @default(0) @db.Decimal(36, 18)
+  lastAccrualAt DateTime    @default(now())
+  maturesAt     DateTime?
+  createdAt     DateTime    @default(now())
+  redeemedAt    DateTime?
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product       EarnProduct @relation(fields: [productId], references: [id])
+
+  @@index([status, lastAccrualAt])
+  @@index([userId, status])
+}
+
+// ---------------- Auto-Invest (recurring buys) ----------------
+
+enum AutoInvestFrequency {
+  HOURLY
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum AutoInvestStatus {
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+model AutoInvestPlan {
+  id             String              @id @default(cuid())
+  userId         String
+  /// What the user pays with (USDT, AED, INR)
+  sourceAsset    String
+  /// What gets bought
+  targetAsset    String
+  amountPerRun   Decimal             @db.Decimal(36, 18)
+  frequency      AutoInvestFrequency
+  status         AutoInvestStatus    @default(ACTIVE)
+  nextRunAt      DateTime
+  totalInvested  Decimal             @default(0) @db.Decimal(36, 18)
+  totalBought    Decimal             @default(0) @db.Decimal(36, 18)
+  runs           Int                 @default(0)
+  failedRuns     Int                 @default(0)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  history        AutoInvestRun[]
+
+  @@index([status, nextRunAt])
+  @@index([userId])
+}
+
+model AutoInvestRun {
+  id        String         @id @default(cuid())
+  planId    String
+  ok        Boolean
+  spent     Decimal        @default(0) @db.Decimal(36, 18)
+  bought    Decimal        @default(0) @db.Decimal(36, 18)
+  price     Decimal?       @db.Decimal(36, 18)
+  error     String?
+  createdAt DateTime       @default(now())
+  plan      AutoInvestPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId, createdAt])
 }

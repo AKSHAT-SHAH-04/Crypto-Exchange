@@ -7,6 +7,7 @@ export function Footer() {
   const { t } = useT();
   const cols = [
     { title: 'Trade', links: [['/markets', t('nav.markets')], ['/trade/BTCUSDT', 'Spot trading'], ['/convert', t('nav.convert')], ['/p2p', 'P2P']] },
+    { title: 'Grow', links: [['/earn', t('nav.earn')], ['/auto-invest', t('nav.autoinvest')], ['/referral', t('nav.referral')]] },
     { title: 'Account', links: [['/wallet', t('nav.wallet')], ['/account?tab=security', 'Security'], ['/account?tab=fees', t('nav.fees')], ['/sub-accounts', t('nav.subaccounts')]] },
     { title: 'Support', links: [['/support', 'Help center'], ['/announcements', t('nav.announcements')], ['/account?tab=api', 'API']] },
   ];
@@ -17,7 +18,7 @@ export function Footer() {
           Crypto assets are volatile and you can lose some or all of the money you invest. Paper trading mode uses demo funds only. Services are
           available in the United Arab Emirates and India only, subject to identity verification, and are not offered to US persons.
         </p>
-        <div className="grid gap-6 py-6 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-6 py-6 sm:grid-cols-4">
           {cols.map((c) => (
             <div key={c.title}>
               <div className="mb-2 font-semibold text-fg">{c.title}</div>

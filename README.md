@@ -16,6 +16,9 @@ A full-stack spot crypto exchange: live markets, pro trading screen, an in-house
 | Markets | 12 USDT pairs with live price, 24h change/high/low/volume, search, sort, gainers/losers, favourites |
 | Trading | Candlestick chart (1m–1w) with live updates, depth chart, live order book with depth bars, price grouping and bids/asks views (click a level to fill the price), market trades, Limit / Market / Stop-limit / **OCO** / **Trailing-stop** orders, open orders, order history, trade history, cancel / cancel all, price alerts |
 | Matching engine | Price-time priority per pair, self-trade prevention, maker/taker fees, partial fills, price improvement refunds, stop and trailing triggers, OCO legs sharing one fund lock. A market-maker bot quotes 12 levels each side around the reference price and fills resting user orders when the market moves through them |
+| Growth | **Referral program** (20% of referees' trading fees, `REFERRAL_COMMISSION_RATE`), **Auto-Invest** recurring buys (hourly → monthly, from USDT or AED/INR), **Simple Earn** flexible & locked products (treasury-funded interest, admin-managed APRs) |
+| More trading | 29 markets including BTC-quoted pairs (ETH/BTC, SOL/BTC, BNB/BTC, XRP/BTC), **post-only** and **IOC / FOK** time-in-force, chart indicators (MA 7/25/99, EMA 20, Bollinger Bands) and line/candle styles |
+| Mobile | Installable app (PWA): web manifest, home-screen icons, offline page; service worker never caches API data |
 | Fees | VIP tiers by 30-day volume (VIP 0–5, admin override), and an optional fee-discount token (`FEE_DISCOUNT_ASSET`, 25% off) |
 | Convert | Instant swap between any two assets with a 10-second guaranteed quote and zero fees (a spread is built into the rate) |
 | P2P | Buy and sell crypto for INR via UPI, IMPS, bank or Paytm. Merchant ads, escrow (crypto is locked until released), payment window with auto-cancel, in-order chat, mark-paid → release flow, disputes resolved by admins, completion-rate stats |

@@ -26,6 +26,18 @@ const assets = [
   { symbol: 'DOT', name: 'Polkadot', precision: 8, networks: ['BEP20'], minWithdraw: 2, withdrawFee: 0.1 },
   { symbol: 'LTC', name: 'Litecoin', precision: 8, networks: ['BEP20'], minWithdraw: 0.05, withdrawFee: 0.001 },
   { symbol: 'TRX', name: 'TRON', precision: 6, networks: ['TRC20'], minWithdraw: 20, withdrawFee: 1 },
+  { symbol: 'SUI', name: 'Sui', precision: 8, networks: ['SUI'], minWithdraw: 2, withdrawFee: 0.1 },
+  { symbol: 'TON', name: 'Toncoin', precision: 8, networks: ['TON'], minWithdraw: 1, withdrawFee: 0.05 },
+  { symbol: 'SHIB', name: 'Shiba Inu', precision: 0, networks: ['ERC20', 'BEP20'], minWithdraw: 1000000, withdrawFee: 300000 },
+  { symbol: 'PEPE', name: 'Pepe', precision: 0, networks: ['ERC20', 'BEP20'], minWithdraw: 1000000, withdrawFee: 300000 },
+  { symbol: 'UNI', name: 'Uniswap', precision: 8, networks: ['ERC20', 'BEP20'], minWithdraw: 1, withdrawFee: 0.2 },
+  { symbol: 'ATOM', name: 'Cosmos', precision: 6, networks: ['ATOM'], minWithdraw: 1, withdrawFee: 0.01 },
+  { symbol: 'ARB', name: 'Arbitrum', precision: 8, networks: ['ARBITRUM'], minWithdraw: 5, withdrawFee: 0.5 },
+  { symbol: 'OP', name: 'Optimism', precision: 8, networks: ['OPTIMISM'], minWithdraw: 5, withdrawFee: 0.5 },
+  { symbol: 'APT', name: 'Aptos', precision: 8, networks: ['APT'], minWithdraw: 1, withdrawFee: 0.02 },
+  { symbol: 'AAVE', name: 'Aave', precision: 8, networks: ['ERC20', 'BEP20'], minWithdraw: 0.05, withdrawFee: 0.01 },
+  { symbol: 'INJ', name: 'Injective', precision: 8, networks: ['BEP20'], minWithdraw: 0.5, withdrawFee: 0.02 },
+  { symbol: 'FIL', name: 'Filecoin', precision: 8, networks: ['FIL', 'BEP20'], minWithdraw: 1, withdrawFee: 0.1 },
 ];
 
 // seedPrice is only used if live prices can't be fetched.
@@ -42,7 +54,24 @@ const pairs = [
   { base: 'DOT', pp: 3, qp: 2, seed: 3 },
   { base: 'LTC', pp: 2, qp: 3, seed: 90 },
   { base: 'TRX', pp: 4, qp: 1, seed: 0.28 },
-];
+  { base: 'SUI', pp: 4, qp: 1, seed: 0.7 },
+  { base: 'TON', pp: 3, qp: 2, seed: 1.6 },
+  { base: 'SHIB', pp: 8, qp: 0, seed: 0.0000038 },
+  { base: 'PEPE', pp: 8, qp: 0, seed: 0.0000038 },
+  { base: 'UNI', pp: 3, qp: 2, seed: 5 },
+  { base: 'ATOM', pp: 3, qp: 2, seed: 1.3 },
+  { base: 'ARB', pp: 4, qp: 1, seed: 0.13 },
+  { base: 'OP', pp: 4, qp: 1, seed: 0.08 },
+  { base: 'APT', pp: 4, qp: 2, seed: 0.44 },
+  { base: 'AAVE', pp: 2, qp: 3, seed: 110 },
+  { base: 'INJ', pp: 3, qp: 2, seed: 7.3 },
+  { base: 'FIL', pp: 4, qp: 2, seed: 0.58 },
+  // BTC-quoted markets (minimum order 0.0001 BTC)
+  { base: 'ETH', quote: 'BTC', pp: 5, qp: 4, seed: 0.0283, minNotional: 0.0001 },
+  { base: 'SOL', quote: 'BTC', pp: 7, qp: 2, seed: 0.00117, minNotional: 0.0001 },
+  { base: 'BNB', quote: 'BTC', pp: 6, qp: 3, seed: 0.0092, minNotional: 0.0001 },
+  { base: 'XRP', quote: 'BTC', pp: 8, qp: 0, seed: 0.0000155, minNotional: 0.0001 },
+] as { base: string; quote?: string; pp: number; qp: number; seed: number; minNotional?: number }[];
 
 async function main() {
   for (const a of [...assets, ...fiat]) {
@@ -50,9 +79,29 @@ async function main() {
     await prisma.asset.upsert({ where: { symbol: a.symbol }, create: data, update: data });
   }
   for (const [i, p] of pairs.entries()) {
-    const symbol = `${p.base}USDT`;
-    const data = { base: p.base, quote: 'USDT', pricePrecision: p.pp, qtyPrecision: p.qp, seedPrice: new D(p.seed), sortOrder: i };
+    const quote = p.quote ?? 'USDT';
+    const symbol = `${p.base}${quote}`;
+    const data = {
+      base: p.base, quote, pricePrecision: p.pp, qtyPrecision: p.qp, seedPrice: new D(p.seed), sortOrder: i,
+      ...(p.minNotional ? { minNotional: new D(p.minNotional) } : {}),
+    };
     await prisma.pair.upsert({ where: { symbol }, create: { symbol, ...data }, update: data });
+  }
+
+  // Simple Earn starter products (crypto only; APR as a fraction). Adjust in Admin → Earn.
+  if (!(await prisma.earnProduct.count())) {
+    await prisma.earnProduct.createMany({
+      data: [
+        { asset: 'USDT', type: 'FLEXIBLE', apr: new D(0.04), minAmount: new D(10) },
+        { asset: 'USDT', type: 'LOCKED', durationDays: 30, apr: new D(0.07), minAmount: new D(50), capacity: new D(5_000_000) },
+        { asset: 'USDT', type: 'LOCKED', durationDays: 90, apr: new D(0.09), minAmount: new D(50), capacity: new D(5_000_000) },
+        { asset: 'BTC', type: 'FLEXIBLE', apr: new D(0.01), minAmount: new D(0.0001) },
+        { asset: 'ETH', type: 'FLEXIBLE', apr: new D(0.02), minAmount: new D(0.001) },
+        { asset: 'ETH', type: 'LOCKED', durationDays: 60, apr: new D(0.035), minAmount: new D(0.01) },
+        { asset: 'SOL', type: 'LOCKED', durationDays: 30, apr: new D(0.06), minAmount: new D(0.1) },
+        { asset: 'BNB', type: 'FLEXIBLE', apr: new D(0.015), minAmount: new D(0.01) },
+      ],
+    });
   }
 
   if (isProd) {

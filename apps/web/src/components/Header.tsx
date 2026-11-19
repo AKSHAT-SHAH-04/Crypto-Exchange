@@ -53,6 +53,8 @@ function AccountMenu() {
   const items = [
     { href: '/account', label: t('nav.account') },
     ...(!user.isSubAccount ? [{ href: '/sub-accounts', label: t('nav.subaccounts') }] : []),
+    { href: '/auto-invest', label: t('nav.autoinvest') },
+    ...(!user.isSubAccount ? [{ href: '/referral', label: t('nav.referral') }] : []),
     { href: '/account?tab=fees', label: t('nav.fees') },
     { href: '/support', label: t('nav.support') },
     { href: '/announcements', label: t('nav.announcements') },
@@ -97,6 +99,7 @@ export function Header() {
     { href: '/trade/BTCUSDT', label: t('nav.trade'), match: '/trade' },
     { href: '/convert', label: t('nav.convert') },
     { href: '/p2p', label: t('nav.p2p') },
+    { href: '/earn', label: t('nav.earn') },
     ...(user ? [{ href: '/wallet', label: t('nav.wallet') }, { href: '/orders', label: t('nav.orders') }] : []),
     ...(user?.role === 'ADMIN' ? [{ href: '/admin', label: t('nav.admin') }] : []),
   ];
@@ -158,6 +161,8 @@ export function Header() {
             {user ? (
               <>
                 <Link href="/account" className="rounded-lg px-2 py-2.5 text-lg font-semibold tracking-tight hover:text-brand">{t('nav.account')}</Link>
+                <Link href="/auto-invest" className="rounded-lg px-2 py-2.5 text-lg font-semibold tracking-tight hover:text-brand">{t('nav.autoinvest')}</Link>
+                {!user.isSubAccount && <Link href="/referral" className="rounded-lg px-2 py-2.5 text-lg font-semibold tracking-tight hover:text-brand">{t('nav.referral')}</Link>}
                 {!user.isSubAccount && <Link href="/sub-accounts" className="rounded-lg px-2 py-2.5 text-lg font-semibold tracking-tight hover:text-brand">{t('nav.subaccounts')}</Link>}
                 <Link href="/support" className="rounded-lg px-2 py-2.5 text-lg font-semibold tracking-tight hover:text-brand">{t('nav.support')}</Link>
                 <Link href="/announcements" className="rounded-lg px-2 py-2.5 text-lg font-semibold tracking-tight hover:text-brand">{t('nav.announcements')}</Link>

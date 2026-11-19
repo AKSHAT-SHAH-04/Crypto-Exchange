@@ -48,6 +48,8 @@ function SideForm({ side, type, market, lastPrice, pickedPrice, baseAvail, quote
   const [stop, setStop] = useState('');
   const [stopLimit, setStopLimit] = useState('');
   const [trail, setTrail] = useState('1');
+  const [tif, setTif] = useState<'GTC' | 'IOC' | 'FOK'>('GTC');
+  const [postOnly, setPostOnly] = useState(false);
   const [amount, setAmount] = useState('');
   const [total, setTotal] = useState('');
   const [busy, setBusy] = useState(false);
@@ -109,6 +111,7 @@ function SideForm({ side, type, market, lastPrice, pickedPrice, baseAvail, quote
           symbol: market.symbol, side, type, quantity: amount, ...(type !== 'MARKET' && { price }),
           ...(type === 'STOP_LIMIT' && { stopPrice: stop }),
           ...(type === 'TRAILING_STOP' && { trailingDelta: String(+trail / 100) }),
+          ...(type === 'LIMIT' && { timeInForce: postOnly ? 'GTC' : tif, postOnly }),
         },
       });
       const filled = +o.filledQty;
@@ -172,6 +175,22 @@ function SideForm({ side, type, market, lastPrice, pickedPrice, baseAvail, quote
         <p className="text-[11px] text-muted">
           Triggers when price {isBuy ? 'rises' : 'falls'} {trail}% from its {isBuy ? 'lowest' : 'highest'} point — now ≈ <span className="num text-fg">{fmt(lastPrice * (isBuy ? 1 + +trail / 100 : 1 - +trail / 100), pp)}</span>
         </p>
+      )}
+      {type === 'LIMIT' && (
+        <div className="flex items-center justify-between gap-2 text-[11px] text-muted">
+          <label className="flex cursor-pointer items-center gap-1.5" title="Only add liquidity: rejected if it would trade immediately (maker fee guaranteed)">
+            <input type="checkbox" checked={postOnly} onChange={(e) => { setPostOnly(e.target.checked); if (e.target.checked) setTif('GTC'); }} />
+            Post-only
+          </label>
+          <label className="flex items-center gap-1.5" title="GTC rests on the book · IOC fills what it can now and cancels the rest · FOK fills completely or not at all">
+            Time in force
+            <select aria-label="Time in force" value={tif} disabled={postOnly} onChange={(e) => setTif(e.target.value as 'GTC' | 'IOC' | 'FOK')} className="rounded-md border border-line bg-panel2 px-1.5 py-0.5 text-[11px] text-fg outline-none disabled:opacity-50">
+              <option value="GTC">GTC</option>
+              <option value="IOC">IOC</option>
+              <option value="FOK">FOK</option>
+            </select>
+          </label>
+        </div>
       )}
       <div className="flex justify-between text-[11px] text-muted">
         <span>{t('trade.fee')}</span>
