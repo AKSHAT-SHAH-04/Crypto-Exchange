@@ -11,7 +11,71 @@ server with an in-memory matching engine, WebSockets and background jobs, so it 
 
 This guide deploys **paper-trading mode** (demo funds, live prices) — safe to put online today.
 
+- **Option A — Free ($0):** Vercel + Render (free API + Redis) + Supabase (free Postgres). Start here.
+- **Option B — Paid (~$10–25/mo):** Vercel + Railway. Always on, no sleeping, more headroom.
+
 ---
+
+# Option A — Free deployment
+
+| Piece | Service (free tier) | Limits to know |
+|---|---|---|
+| Website | Vercel Hobby | Non-commercial use only |
+| API + Redis | Render free web service + free Key Value | 512 MB RAM; **sleeps after 15 min without traffic** (step A5 keeps it awake); 750 h/month ≈ 24/7 for one service |
+| Database | Supabase free Postgres | 500 MB; paused only after 7 days without activity (the API keeps it active) |
+
+### A1. Database — Supabase (~3 min)
+1. supabase.com → sign in with GitHub → **New project** → region **Southeast Asia (Singapore)** → set a strong
+   database password (save it).
+2. Project → **Connect** → copy the **Session pooler** connection string (host `…pooler.supabase.com`, port `5432`)
+   and replace `[YOUR-PASSWORD]`. Use the session pooler, not "direct": Render can't reach Supabase's IPv6-only
+   direct host.
+
+### A2. API + Redis — Render (~5 min + first build)
+1. render.com → sign in with GitHub → **New → Blueprint** → select the `Crypto-Exchange` repo.
+   It reads `render.yaml` and creates `zentra-api` (Docker, Singapore) and `zentra-redis`.
+2. When asked, fill in:
+   - `DATABASE_URL` → the Supabase session-pooler string from A1
+   - `WEB_URL` → `https://zentra.vercel.app` for now (fixed in A4)
+
+   `JWT_SECRET` and `ENCRYPTION_KEY` are generated for you. **Never change `ENCRYPTION_KEY` afterwards.**
+3. **Apply.** The first Docker build takes a few minutes. Migrations run automatically on start.
+4. Open `https://<your-service>.onrender.com/api/health` → `{"ok":true,...}`.
+
+### A3. Seed markets + your admin (from your laptop, once)
+Render's free tier has no shell, so seed from your machine against the Supabase database:
+```bash
+cd /path/to/Crypto-Exchange
+DATABASE_URL='<supabase session pooler url>' NODE_ENV=production \
+SEED_ADMIN_EMAIL='you@yourdomain.com' SEED_ADMIN_PASSWORD='a-long-unique-password' \
+npm run db:seed:prod -w apps/api
+```
+Then on Render → `zentra-api` → **Manual Deploy → Restart service** so it loads the markets.
+Log in later and **turn on 2FA for the admin right away**.
+
+### A4. Website — Vercel (~3 min)
+1. vercel.com → sign in with GitHub → **Add New → Project** → import the repo → **Root Directory: `apps/web`**.
+2. Environment variables:
+   - `API_INTERNAL_URL` = `https://<your-service>.onrender.com`
+   - `NEXT_PUBLIC_WS_URL` = `wss://<your-service>.onrender.com/ws`
+   - `NEXT_PUBLIC_BRAND_NAME` = `Zentra`
+3. **Deploy**, then copy the site URL into Render's `WEB_URL` (Render redeploys automatically).
+
+### A5. Keep the API awake (free)
+cron-job.org (free) → new cron job → URL `https://<your-service>.onrender.com/api/health` → every **10 minutes**.
+Without this, the first visitor after 15 idle minutes waits ~1 minute while the API wakes up.
+
+### A6. Check
+- Open `https://<vercel-site>/api/meta` — `yourIp` should be **your** public IP. If it shows a data-center IP,
+  change `TRUST_PROXY_HOPS` on Render (try `3`), otherwise rate limits would be shared by all users.
+- Markets show live prices; register (10,000 demo USDT); place a trade; admin panel loads.
+
+On a free instance the API restarts now and then: open orders, balances and history are kept (they live in
+Postgres), and the market-maker quotes refill within seconds.
+
+---
+
+# Option B — Paid: Railway
 
 ## 1. API + database + Redis on Railway (~10 min)
 

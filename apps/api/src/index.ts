@@ -107,7 +107,9 @@ app.get('/api/health', async (_req, reply) => {
 });
 
 /** Public, non-secret configuration the web app needs. */
-app.get('/api/meta', async () => ({
+app.get('/api/meta', async (req) => ({
+  // lets you confirm TRUST_PROXY_HOPS is right after deploying: this should equal your real public IP
+  yourIp: req.ip,
   tradingMode: config.tradingMode,
   allowedCountries: config.allowedCountries,
   blockedCountries: config.blockedCountries,

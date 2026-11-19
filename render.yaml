@@ -1,0 +1,44 @@
+# Render Blueprint — free API + Redis for Zentra (paper-trading mode).
+# Render dashboard → New → Blueprint → pick this repo. See DEPLOY.md → "Free deployment".
+services:
+  - type: web
+    name: zentra-api
+    runtime: docker
+    plan: free
+    # Not a US region: Binance's public market data is blocked from US servers.
+    region: singapore
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRADING_MODE
+        value: paper
+      - key: DATABASE_URL
+        sync: false # paste the Supabase "Session pooler" connection string
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: zentra-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true # generated once; never change it (it decrypts stored API secrets and 2FA keys)
+      - key: WEB_URL
+        sync: false # your Vercel URL, e.g. https://zentra.vercel.app
+      - key: TRUST_PROXY_HOPS
+        value: "2"
+      - key: GEO_IP_HEADER
+        value: x-vercel-ip-country
+      - key: NEXT_PUBLIC_BRAND_NAME
+        value: Zentra
+
+  - type: keyvalue
+    name: zentra-redis
+    plan: free
+    region: singapore
+    maxmemoryPolicy: allkeys-lru # free tier is 25 MB; everything stored is a cache or short-lived
+    ipAllowList: [] # internal connections from zentra-api only

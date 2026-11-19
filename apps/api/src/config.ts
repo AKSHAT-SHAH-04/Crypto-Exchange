@@ -35,7 +35,8 @@ export const config = {
   webUrl: env('WEB_URL', 'http://localhost:3000'),
   redisUrl: env('REDIS_URL', 'redis://localhost:6379'),
   jwtSecret: env('JWT_SECRET'),
-  encryptionKey: Buffer.from(env('ENCRYPTION_KEY', '0'.repeat(64)), 'hex'),
+  // 32-byte key as 64 hex chars (openssl rand -hex 32) or base64 (e.g. Render's generateValue)
+  encryptionKey: ((k: string) => (/^[0-9a-fA-F]{64}$/.test(k) ? Buffer.from(k, 'hex') : Buffer.from(k, 'base64')))(env('ENCRYPTION_KEY', '0'.repeat(64))),
   tradingMode,
   isLive: tradingMode === 'live',
   signupBonus: env('SIGNUP_BONUS_USDT', '10000'),
@@ -112,7 +113,7 @@ export const config = {
 const fail = (m: string) => {
   throw new Error(`[config] ${m}`);
 };
-if (config.encryptionKey.length !== 32) fail('ENCRYPTION_KEY must be 32 bytes of hex (64 chars)');
+if (config.encryptionKey.length !== 32) fail('ENCRYPTION_KEY must be 32 bytes: 64 hex chars (openssl rand -hex 32) or base64');
 if (config.isProd) {
   if (config.jwtSecret.startsWith('change-me') || config.jwtSecret.length < 32) fail('JWT_SECRET must be a long random value in production');
   if (config.encryptionKey.equals(Buffer.alloc(32))) fail('ENCRYPTION_KEY must not be all zeros in production');
