@@ -1,0 +1,267 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+  SYSTEM
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderType {
+  LIMIT
+  MARKET
+  STOP_LIMIT
+}
+
+enum OrderStatus {
+  PENDING_TRIGGER
+  OPEN
+  PARTIALLY_FILLED
+  FILLED
+  CANCELED
+  REJECTED
+}
+
+enum TxType {
+  DEPOSIT
+  WITHDRAWAL
+  BONUS
+  ADJUSTMENT
+}
+
+enum TxStatus {
+  AWAITING_EMAIL
+  PENDING_APPROVAL
+  COMPLETED
+  REJECTED
+  CANCELED
+}
+
+enum KycStatus {
+  NONE
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TokenPurpose {
+  VERIFY_EMAIL
+  RESET_PASSWORD
+  CONFIRM_WITHDRAWAL
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  name            String?
+  passwordHash    String?
+  googleId        String?   @unique
+  emailVerified   Boolean   @default(false)
+  role            Role      @default(USER)
+  frozen          Boolean   @default(false)
+  totpSecret      String?
+  totpEnabled     Boolean   @default(false)
+  tokenVersion    Int       @default(0)
+  kycStatus       KycStatus @default(NONE)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  balances        Balance[]
+  orders          Order[]
+  transactions    Transaction[]
+  addresses       WithdrawalAddress[]
+  kyc             KycSubmission[]
+  apiKeys         ApiKey[]
+  auditLogs       AuditLog[]
+  tokens          Token[]
+  favorites       Favorite[]
+}
+
+model Asset {
+  symbol     String   @id
+  name       String
+  precision  Int      @default(8)
+  networks   String[]
+  minWithdraw Decimal @default(0) @db.Decimal(36, 18)
+  withdrawFee Decimal @default(0) @db.Decimal(36, 18)
+  enabled    Boolean  @default(true)
+}
+
+model Pair {
+  symbol         String   @id // e.g. BTCUSDT
+  base           String
+  quote          String
+  pricePrecision Int      @default(2)
+  qtyPrecision   Int      @default(6)
+  minNotional    Decimal  @default(5) @db.Decimal(36, 18)
+  makerFee       Decimal  @default(0.001) @db.Decimal(10, 6)
+  takerFee       Decimal  @default(0.001) @db.Decimal(10, 6)
+  enabled        Boolean  @default(true)
+  seedPrice      Decimal  @default(1) @db.Decimal(36, 18)
+  sortOrder      Int      @default(100)
+  createdAt      DateTime @default(now())
+}
+
+model Balance {
+  userId    String
+  asset     String
+  available Decimal @default(0) @db.Decimal(36, 18)
+  locked    Decimal @default(0) @db.Decimal(36, 18)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, asset])
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  userId      String
+  symbol      String
+  side        OrderSide
+  type        OrderType
+  status      OrderStatus
+  price       Decimal?    @db.Decimal(36, 18)
+  stopPrice   Decimal?    @db.Decimal(36, 18)
+  quantity    Decimal     @db.Decimal(36, 18)
+  filledQty   Decimal     @default(0) @db.Decimal(36, 18)
+  quoteFilled Decimal     @default(0) @db.Decimal(36, 18)
+  // Quote reserved per unit of base for BUY orders (limit price, or worst fill price for market buys)
+  lockPrice   Decimal?    @db.Decimal(36, 18)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([symbol, status])
+}
+
+model Trade {
+  id          String    @id @default(cuid())
+  symbol      String
+  price       Decimal   @db.Decimal(36, 18)
+  quantity    Decimal   @db.Decimal(36, 18)
+  takerSide   OrderSide
+  buyOrderId  String?
+  sellOrderId String?
+  buyerId     String?
+  sellerId    String?
+  buyerFee    Decimal   @default(0) @db.Decimal(36, 18)
+  sellerFee   Decimal   @default(0) @db.Decimal(36, 18)
+  createdAt   DateTime  @default(now())
+
+  @@index([symbol, createdAt])
+  @@index([buyerId, createdAt])
+  @@index([sellerId, createdAt])
+}
+
+model Transaction {
+  id          String    @id @default(cuid())
+  userId      String
+  type        TxType
+  status      TxStatus
+  asset       String
+  network     String?
+  amount      Decimal   @db.Decimal(36, 18)
+  fee         Decimal   @default(0) @db.Decimal(36, 18)
+  address     String?
+  txHash      String?
+  note        String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([type, status])
+}
+
+model WithdrawalAddress {
+  id        String   @id @default(cuid())
+  userId    String
+  asset     String
+  network   String
+  address   String
+  label     String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, asset, network, address])
+}
+
+model KycSubmission {
+  id          String    @id @default(cuid())
+  userId      String
+  fullName    String
+  dateOfBirth String
+  country     String
+  idType      String
+  idNumber    String
+  status      KycStatus @default(PENDING)
+  reviewNote  String?
+  reviewedBy  String?
+  createdAt   DateTime  @default(now())
+  reviewedAt  DateTime?
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+model ApiKey {
+  id              String    @id @default(cuid())
+  userId          String
+  label           String
+  key             String    @unique
+  secretEncrypted String
+  canTrade        Boolean   @default(false)
+  lastUsedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  ip        String?
+  userAgent String?
+  meta      Json?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+model Token {
+  id        String       @id @default(cuid())
+  userId    String
+  purpose   TokenPurpose
+  tokenHash String       @unique
+  refId     String?
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime     @default(now())
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Favorite {
+  userId String
+  symbol String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, symbol])
+}
+
+model Setting {
+  key   String @id
+  value Json
+}
