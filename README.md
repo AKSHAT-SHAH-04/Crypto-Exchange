@@ -128,13 +128,31 @@ API keys can read data and (if enabled) trade. They cannot change account securi
 
 Auth, account and admin routes are in `apps/api/src/routes`.
 
-## Phase 2 roadmap (real money)
+## Real money: how money moves
 
-Phase 2 needs the corresponding provider keys:
+| Flow | Rail | Fee to user | How it settles |
+|---|---|---|---|
+| Deposit AED / INR | Bank transfer to the company client-money account, quoting the user's reference (`CX…`) | **Free** | Bank partner webhook `POST /api/webhooks/bank` (HMAC-signed) or admin reconciliation. Transfers from a name that doesn't match KYC are held for review |
+| Withdraw AED / INR | Bank payout to the user's own account (holder must match KYC) | `FIAT_WITHDRAW_FEE` (default 0) | Email confirmation → admin approval → bank payout (webhook or "mark paid") |
+| Deposit crypto | Per-user address at the custodian (Fireblocks omnibus vault) | Free | Credited only when the custodian's signed webhook reports `COMPLETED` |
+| Withdraw crypto | Custodian transaction to a whitelisted address | Per-asset network fee | Admin approval → custodian → webhook completes or refunds |
+| Buy with card / Apple Pay | Onramper aggregator (cheapest licensed provider per order) or Transak | Partner's fee (≈1% bank, 3–5% card) | Partner sends crypto on-chain to the user's own deposit address; credited via the custodian |
+| Sell to card / bank | Partner off-ramp | Partner's fee | User confirms the on-chain transfer to the partner with 2FA |
+| Convert (incl. AED/INR ↔ crypto) | Internal, against the treasury | 0.1% spread, no fee | Treasury inventory must cover payouts in live mode |
+| P2P (AED / INR) | User-to-user; Aani, UAE bank, UPI, IMPS | Free | Escrowed on-platform |
 
-1. **Custody & on-chain:** real deposit addresses and deposit detection (Alchemy/Infura for EVM, Tatum/BlockCypher for BTC), or a custodian (Fireblocks/BitGo). Replace `fakeAddress()` and the admin "approve" step with a real broadcaster.
-2. **Fiat on-ramp:** INR deposits and withdrawals via a payment provider, with webhooks crediting `Transaction` rows.
-3. **KYC provider:** document upload and liveness (Sumsub/Onfido/HyperVerge) in place of the manual form.
-4. **SMS OTP:** Twilio/MSG91.
-5. **Ops:** Sentry, backups, and a dedicated matching-engine process with a write-ahead log.
-6. **Compliance:** operating a real exchange requires regulatory registration (in India, FIU-IND under the PMLA) plus AML/transaction monitoring. Get legal advice before enabling `live` mode.
+**Ledger invariant:** the sum of user balances plus the treasury account (`treasury@system.internal`) equals the assets held at the custodian and banks. Trading fees, withdrawal fees and the Convert spread accrue to the treasury.
+
+**Jurisdictions:** onboarding is limited to `ALLOWED_COUNTRIES` (default UAE + India). US users are blocked by KYC country and by the edge IP-country header (`GEO_IP_HEADER`). Blocked users can still log in, cancel orders and withdraw their own funds.
+
+## Going live checklist
+
+`TRADING_MODE=live` refuses to start unless the basics are in place: a real custodian, the market maker off, a live price feed, email configured, HTTPS and strong secrets. Beyond that:
+
+1. **Licences:** VARA licence (Dubai) and FIU-IND registration (India). Get legal sign-off on terms, AML/CFT program and Travel Rule handling.
+2. **Partners:** UAE and India banking partners (client-money accounts plus webhooks), Fireblocks workspace (omnibus vault, webhook public key, `FIREBLOCKS_ASSET_MAP` verified in sandbox), and an Onramper or Transak production account. Verify widget parameters and webhook signatures in their sandboxes.
+3. **KYC:** replace the manual form with a KYC/AML provider (document + liveness + sanctions screening).
+4. **Infra:** run exactly **one** API instance (the matching engine is in-process), behind a CDN/WAF that sets the country header (`TRUST_PROXY_HOPS` must match your proxies). Managed Postgres with PITR backups, managed Redis, Sentry.
+5. **Seed:** `NODE_ENV=production SEED_ADMIN_EMAIL=… SEED_ADMIN_PASSWORD=… npm run db:seed`. No demo users are created. Enable 2FA on every admin.
+6. **Treasury:** pre-fund the treasury account for Convert inventory, and reconcile it daily against custodian and bank balances.
+7. **Dependencies:** upgrade Next.js (critical advisory) and Fastify 5 before launch (see the production-readiness notes).

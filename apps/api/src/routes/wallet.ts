@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authenticator } from 'otplib';
+import { requireTotpIfEnabled } from '../lib/totp.js';
 import { prisma, D, ZERO } from '../db.js';
 import { config } from '../config.js';
 import { requireAuth, requireSession } from '../lib/auth.js';
@@ -10,31 +10,21 @@ import { emails } from '../lib/email.js';
 import { consumeToken, issueToken } from '../lib/tokens.js';
 import { sha256 } from '../lib/crypto.js';
 import { getPrice } from '../market/feed.js';
+import { usdPerUnit } from '../lib/fx.js';
+import { getOrCreateDepositAddress } from '../custody/index.js';
 import { adjustBalance, lockFunds, notifyUser } from '../engine/engine.js';
 
 export function usdPrice(asset: string) {
   if (asset === 'USDT' || asset === 'USDC') return 1;
+  if (config.fiatCurrencies.includes(asset)) return usdPerUnit(asset);
   return getPrice(`${asset}USDT`) ?? 0;
-}
-
-const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-function fakeAddress(seed: string, network: string) {
-  const h = sha256(seed) + sha256(seed + '2');
-  const b58 = (n: number) => Array.from({ length: n }, (_, i) => B58[parseInt(h.slice(i * 2, i * 2 + 2), 16) % 58]).join('');
-  switch (network) {
-    case 'BTC': return `bc1q${h.slice(0, 38)}`;
-    case 'TRC20': return `T${b58(33)}`;
-    case 'SOL': return b58(44);
-    case 'XRP': return `r${b58(33)}`;
-    default: return `0x${h.slice(0, 40)}`;
-  }
 }
 
 const serializeTx = (t: any) => ({ ...t, amount: t.amount.toString(), fee: t.fee.toString() });
 
 export async function walletRoutes(app: FastifyInstance) {
   app.get('/api/wallet/assets', async () => {
-    const assets = await prisma.asset.findMany({ where: { enabled: true }, orderBy: { symbol: 'asc' } });
+    const assets = await prisma.asset.findMany({ where: { enabled: true }, orderBy: [{ isFiat: 'desc' }, { symbol: 'asc' }] });
     return assets.map((a) => ({ ...a, minWithdraw: a.minWithdraw.toString(), withdrawFee: a.withdrawFee.toString(), usdPrice: usdPrice(a.symbol) }));
   });
 
@@ -62,13 +52,10 @@ export async function walletRoutes(app: FastifyInstance) {
   app.get('/api/wallet/deposit-address', { preHandler: requireAuth }, async (req) => {
     const q = z.object({ asset: z.string(), network: z.string() }).parse(req.query);
     const asset = await prisma.asset.findUnique({ where: { symbol: q.asset } });
-    if (!asset || !asset.networks.includes(q.network)) throw badRequest('Unsupported asset/network');
-    return {
-      asset: q.asset,
-      network: q.network,
-      address: fakeAddress(`${req.user!.id}:${q.asset}:${q.network}`, q.network),
-      demo: config.tradingMode === 'paper',
-    };
+    if (!asset || asset.isFiat || !asset.networks.includes(q.network)) throw badRequest('Unsupported asset/network');
+    if (config.isLive && req.user!.kycStatus !== 'APPROVED') throw forbidden('Complete identity verification (KYC) before depositing');
+    const addr = await getOrCreateDepositAddress(req.user!.id, q.asset, q.network);
+    return { asset: q.asset, network: q.network, address: addr.address, tag: addr.tag, demo: !config.isLive };
   });
 
   /** Paper trading only: instantly credit demo funds. */
@@ -81,12 +68,13 @@ export async function walletRoutes(app: FastifyInstance) {
     if (amount.lte(0)) throw badRequest('Amount must be positive');
     if (amount.toNumber() * usdPrice(asset.symbol) > 100_000) throw badRequest('Demo deposits are limited to $100,000 per request');
     const network = asset.networks[0];
+    const addr = asset.isFiat ? null : await getOrCreateDepositAddress(req.user!.id, asset.symbol, network);
     await prisma.$transaction(async (tx) => {
       await adjustBalance(tx, req.user!.id, asset.symbol, amount);
       await tx.transaction.create({
         data: {
           userId: req.user!.id, type: 'DEPOSIT', status: 'COMPLETED', asset: asset.symbol, network, amount,
-          address: fakeAddress(`${req.user!.id}:${asset.symbol}:${network}`, network), txHash: `demo-${sha256(String(Date.now())).slice(0, 48)}`,
+          rail: asset.isFiat ? 'BANK' : 'CRYPTO', address: addr?.address ?? null, txHash: `demo-${sha256(String(Date.now())).slice(0, 48)}`,
           note: 'Demo deposit',
         },
       });
@@ -122,10 +110,10 @@ export async function walletRoutes(app: FastifyInstance) {
       })
       .parse(req.body);
     const asset = await prisma.asset.findUnique({ where: { symbol: body.asset } });
-    if (!asset || !asset.networks.includes(body.network)) throw badRequest('Unsupported asset/network');
+    if (!asset || asset.isFiat || !asset.networks.includes(body.network)) throw badRequest('Unsupported asset/network');
     const u = req.user!;
     if (u.parentId) throw forbidden('Sub-accounts cannot manage withdrawal addresses');
-    if (u.totpEnabled && (!body.code || !authenticator.check(body.code, u.totpSecret!))) throw badRequest('Invalid 2FA code');
+    if (!(await requireTotpIfEnabled(u, body.code))) throw badRequest('Invalid 2FA code');
     const addr = await prisma.withdrawalAddress.create({
       data: { userId: u.id, asset: body.asset, network: body.network, address: body.address, label: body.label },
     });
@@ -147,11 +135,12 @@ export async function walletRoutes(app: FastifyInstance) {
     if (u.parentId) throw forbidden('Sub-accounts cannot withdraw. Transfer funds to your main account first.');
     if (!u.emailVerified) throw forbidden('Verify your email before withdrawing');
     if (u.kycStatus !== 'APPROVED') throw forbidden('Complete identity verification (KYC) before withdrawing');
-    if (u.totpEnabled && (!body.code || !authenticator.check(body.code, u.totpSecret!))) throw badRequest('Invalid 2FA code');
+    if (!(await requireTotpIfEnabled(u, body.code))) throw badRequest('Invalid 2FA code');
     const addr = await prisma.withdrawalAddress.findFirst({ where: { id: body.addressId, userId: u.id } });
     if (!addr) throw badRequest('Withdrawals can only be sent to a whitelisted address');
+    if (config.isLive && Date.now() - addr.createdAt.getTime() < 24 * 3600e3) throw forbidden('For your security, new addresses can be used 24 hours after they are added');
     const asset = await prisma.asset.findUnique({ where: { symbol: addr.asset } });
-    if (!asset?.enabled) throw badRequest('Asset unavailable');
+    if (!asset?.enabled || asset.isFiat) throw badRequest('Asset unavailable');
     const amount = new D(body.amount).toDecimalPlaces(asset.precision, D.ROUND_DOWN);
     if (amount.lt(asset.minWithdraw) || amount.lte(asset.withdrawFee)) throw badRequest(`Minimum withdrawal is ${D.max(asset.minWithdraw, asset.withdrawFee)} ${asset.symbol}`);
 

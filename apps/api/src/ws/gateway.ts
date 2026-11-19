@@ -9,7 +9,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
-import { redis, redisSub, EVENTS_CHANNEL, type ExchangeEvent } from '../redis.js';
+import { redisSub, EVENTS_CHANNEL, type ExchangeEvent } from '../redis.js';
 import { verifyJwt } from '../lib/auth.js';
 import { getTickers, getMarketTrades } from '../market/feed.js';
 import { getBook } from '../engine/engine.js';
@@ -21,6 +21,16 @@ interface Client {
 }
 
 const clients = new Set<Client>();
+const perIp = new Map<string, number>();
+const MAX_CONN_PER_IP = 20;
+const MAX_CHANNELS = 100;
+
+/** Only real channels: "tickers", or depth:/trades: for a listed pair. */
+function validChannel(ch: string) {
+  if (ch === 'tickers') return true;
+  const m = /^(depth|trades):([A-Z0-9]{2,20})$/.exec(ch);
+  return !!m && !!getBook(m[2]);
+}
 
 export async function registerGateway(app: FastifyInstance) {
   await redisSub.subscribe(EVENTS_CHANNEL);
@@ -40,9 +50,25 @@ export async function registerGateway(app: FastifyInstance) {
     }
   });
 
-  app.get('/ws', { websocket: true }, (socket) => {
+  app.get('/ws', { websocket: true }, (socket, req) => {
+    const ip = req.ip;
+    const count = (perIp.get(ip) ?? 0) + 1;
+    if (count > MAX_CONN_PER_IP) {
+      socket.close(1008, 'Too many connections');
+      return;
+    }
+    perIp.set(ip, count);
     const client: Client = { ws: socket, channels: new Set() };
     clients.add(client);
+    let closed = false;
+    const release = () => {
+      if (closed) return;
+      closed = true;
+      clients.delete(client);
+      const n = (perIp.get(ip) ?? 1) - 1;
+      if (n <= 0) perIp.delete(ip);
+      else perIp.set(ip, n);
+    };
     socket.on('message', async (raw: Buffer) => {
       let m: any;
       try {
@@ -57,27 +83,25 @@ export async function registerGateway(app: FastifyInstance) {
         return socket.send(JSON.stringify({ ch: 'auth', data: { ok: !!p } }));
       }
       if (!Array.isArray(m.channels)) return;
-      const chans = m.channels.filter((c: unknown) => typeof c === 'string').slice(0, 50) as string[];
+      const chans = (m.channels.filter((c: unknown) => typeof c === 'string') as string[]).slice(0, 50);
       if (m.op === 'subscribe') {
         for (const ch of chans) {
+          if (!validChannel(ch) || client.channels.has(ch)) continue;
+          if (client.channels.size >= MAX_CHANNELS) break;
           client.channels.add(ch);
           // send a snapshot immediately so the UI doesn't wait for the next tick
           if (ch === 'tickers') socket.send(JSON.stringify({ ch, data: getTickers() }));
           else if (ch.startsWith('depth:')) {
             const book = getBook(ch.slice(6));
-            if (book) socket.send(JSON.stringify({ ch, data: book.depth(20) }));
-            else {
-              const cached = await redis.get(`exchange:${ch}`);
-              if (cached) socket.send(JSON.stringify({ ch, data: JSON.parse(cached) }));
-            }
+            if (book) socket.send(JSON.stringify({ ch, data: book.depth(50) }));
           } else if (ch.startsWith('trades:')) {
             socket.send(JSON.stringify({ ch: `${ch}:snapshot`, data: getMarketTrades(ch.slice(7)) }));
           }
         }
       } else if (m.op === 'unsubscribe') chans.forEach((c) => client.channels.delete(c));
     });
-    socket.on('close', () => clients.delete(client));
-    socket.on('error', () => clients.delete(client));
+    socket.on('close', release);
+    socket.on('error', release);
   });
 
   // keep idle connections alive through proxies

@@ -9,12 +9,14 @@ import { adjustBalance, cancelAllForUser, listPairs, notifyUser, reloadPairs } f
 import { updateFeedPairs } from '../market/feed.js';
 import { serializePair } from './markets.js';
 import { notify } from '../lib/notify.js';
+import { custody } from '../custody/index.js';
+import { completeWithdrawal } from '../lib/settlement.js';
 import { invalidateFeeProfile } from '../engine/fees.js';
 
 export async function adminRoutes(app: FastifyInstance) {
-  app.addHook('preHandler', async (req) => {
-    if (req.url.startsWith('/api/admin/')) await requireAdmin(req);
-  });
+  // Hooks are encapsulated to this plugin, so this guards every route registered below (and nothing else).
+  // Never gate on req.url: it is the raw, still-percent-encoded path and can differ from the matched route.
+  app.addHook('preHandler', requireAdmin);
 
   app.get('/api/admin/stats', async () => {
     const dayAgo = new Date(Date.now() - 86400e3);
@@ -62,7 +64,7 @@ export async function adminRoutes(app: FastifyInstance) {
     if (id === req.user!.id) throw badRequest("You can't modify your own account here");
     const user = await prisma.user.update({
       where: { id },
-      data: { ...body, ...(body.frozen ? { tokenVersion: { increment: 1 } } : {}) },
+      data: { ...body, ...(body.frozen !== undefined ? { frozenByAdmin: body.frozen } : {}), ...(body.frozen ? { tokenVersion: { increment: 1 } } : {}) },
     });
     if (body.frozen) await cancelAllForUser(id);
     if (body.vipOverride !== undefined) invalidateFeeProfile(id);
@@ -99,7 +101,7 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!sub || sub.status !== 'PENDING') throw badRequest('Submission is not pending');
     await prisma.$transaction([
       prisma.kycSubmission.update({ where: { id }, data: { status: body.decision, reviewNote: body.note, reviewedBy: req.user!.id, reviewedAt: new Date() } }),
-      prisma.user.update({ where: { id: sub.userId }, data: { kycStatus: body.decision } }),
+      prisma.user.update({ where: { id: sub.userId }, data: { kycStatus: body.decision, ...(body.decision === 'APPROVED' ? { country: sub.country.toUpperCase() } : {}) } }),
     ]);
     await audit(req, req.user!.id, 'admin.kyc_reviewed', { submission: id, decision: body.decision });
     await notify(sub.userId, {
@@ -113,44 +115,60 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // ---------- withdrawals ----------
   app.get('/api/admin/withdrawals', async (req) => {
-    const { status } = z.object({ status: z.enum(['AWAITING_EMAIL', 'PENDING_APPROVAL', 'COMPLETED', 'REJECTED', 'CANCELED']).default('PENDING_APPROVAL') }).parse(req.query);
+    const { status } = z.object({ status: z.enum(['AWAITING_EMAIL', 'PENDING_APPROVAL', 'PROCESSING', 'COMPLETED', 'FAILED', 'REJECTED', 'CANCELED']).default('PENDING_APPROVAL') }).parse(req.query);
     const rows = await prisma.transaction.findMany({
       where: { type: 'WITHDRAWAL', status },
       orderBy: { createdAt: 'asc' },
       take: 100,
       include: { user: { select: { email: true } } },
     });
-    return rows.map((t) => ({ ...t, amount: t.amount.toString(), fee: t.fee.toString() }));
+    const bankIds = rows.map((r) => r.bankAccountId).filter(Boolean) as string[];
+    const banks = new Map((await prisma.bankAccount.findMany({ where: { id: { in: bankIds } } })).map((b) => [b.id, b]));
+    return rows.map((t) => ({ ...t, amount: t.amount.toString(), fee: t.fee.toString(), bankAccount: t.bankAccountId ? banks.get(t.bankAccountId) ?? null : null }));
   });
 
   app.post('/api/admin/withdrawals/:id', async (req) => {
     const id = (req.params as any).id;
     const body = z.object({ decision: z.enum(['APPROVE', 'REJECT']), note: z.string().max(300).optional() }).parse(req.body);
-    const tx = await prisma.$transaction(async (t) => {
-      const w = await t.transaction.findUnique({ where: { id } });
-      if (!w || w.type !== 'WITHDRAWAL') throw notFound();
-      const r = await t.transaction.updateMany({
-        where: { id, status: 'PENDING_APPROVAL' },
-        data: {
-          status: body.decision === 'APPROVE' ? 'COMPLETED' : 'REJECTED',
-          note: body.note,
-          txHash: body.decision === 'APPROVE' ? `0x${sha256(id + Date.now())}` : null,
-        },
+    const w = await prisma.transaction.findUnique({ where: { id } });
+    if (!w || w.type !== 'WITHDRAWAL') throw notFound();
+
+    if (body.decision === 'REJECT') {
+      await prisma.$transaction(async (t) => {
+        const r = await t.transaction.updateMany({ where: { id, status: 'PENDING_APPROVAL' }, data: { status: 'REJECTED', note: body.note } });
+        if (!r.count) throw badRequest('Withdrawal is not pending approval');
+        await adjustBalance(t, w.userId, w.asset, w.amount, w.amount.neg());
       });
-      if (!r.count) throw badRequest('Withdrawal is not pending approval');
-      if (body.decision === 'APPROVE') await adjustBalance(t, w.userId, w.asset, new D(0), w.amount.neg());
-      else await adjustBalance(t, w.userId, w.asset, w.amount, w.amount.neg());
-      return w;
-    });
-    await audit(req, req.user!.id, 'admin.withdrawal_reviewed', { id, decision: body.decision });
-    await notify(tx.userId, {
-      type: 'wallet',
-      title: body.decision === 'APPROVE' ? 'Withdrawal completed' : 'Withdrawal rejected',
-      body: `${tx.amount} ${tx.asset}${body.decision === 'REJECT' ? ` — funds returned to your wallet${body.note ? `. Reason: ${body.note}` : ''}` : ` sent to ${tx.address}`}`,
-      link: '/wallet',
-    });
-    notifyUser(tx.userId);
-    return { ok: true };
+      await audit(req, req.user!.id, 'admin.withdrawal_reviewed', { id, decision: 'REJECT' });
+      await notify(w.userId, { type: 'wallet', title: 'Withdrawal rejected', body: `${w.amount} ${w.asset} returned to your wallet${body.note ? `. Reason: ${body.note}` : ''}`, link: '/wallet' });
+      notifyUser(w.userId);
+      return { ok: true };
+    }
+
+    // APPROVE: claim it first (PENDING_APPROVAL -> PROCESSING) so it can only be sent once.
+    const claimed = await prisma.transaction.updateMany({ where: { id, status: 'PENDING_APPROVAL' }, data: { status: 'PROCESSING', note: body.note } });
+    if (!claimed.count) throw badRequest('Withdrawal is not pending approval');
+    await audit(req, req.user!.id, 'admin.withdrawal_reviewed', { id, decision: 'APPROVE', rail: w.rail });
+
+    if (w.rail === 'BANK') {
+      // Paid out by the bank partner (webhook) or marked paid by ops via /api/admin/fiat/payouts/:id
+      await notify(w.userId, { type: 'wallet', title: 'Withdrawal approved', body: `${w.amount} ${w.asset} is being paid to ${w.address}.`, link: '/wallet' });
+      notifyUser(w.userId);
+      return { ok: true, status: 'PROCESSING' };
+    }
+
+    try {
+      const sent = await custody.sendWithdrawal({ id: w.id, asset: w.asset, network: w.network!, amount: w.amount.minus(w.fee).toString(), address: w.address! });
+      await prisma.transaction.update({ where: { id }, data: { provider: custody.name, providerRef: sent.providerRef, txHash: sent.txHash ?? null } });
+      if (custody.synchronous) await completeWithdrawal(w, sent.txHash);
+    } catch (e) {
+      // custodian refused / unreachable: put it back in the queue, funds stay locked
+      await prisma.transaction.updateMany({ where: { id, status: 'PROCESSING' }, data: { status: 'PENDING_APPROVAL', note: `Send failed: ${(e as Error).message.slice(0, 180)}` } });
+      req.log.error(e, 'custody send failed');
+      throw badRequest(`Custodian rejected the withdrawal: ${(e as Error).message.slice(0, 200)}`);
+    }
+    notifyUser(w.userId);
+    return { ok: true, status: custody.synchronous ? 'COMPLETED' : 'PROCESSING' };
   });
 
   // ---------- pairs & fees ----------

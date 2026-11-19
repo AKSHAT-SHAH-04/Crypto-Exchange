@@ -9,8 +9,11 @@ import { badRequest } from '../lib/errors.js';
 import { audit } from '../lib/audit.js';
 import { adjustBalance, debitAvailable, notifyUser } from '../engine/engine.js';
 import { usdPrice } from './wallet.js';
+import { config } from '../config.js';
+import { getTreasuryId } from '../lib/treasury.js';
+import { isPriceFresh } from '../market/feed.js';
 
-const SPREAD = Number(process.env.CONVERT_SPREAD || '0.002'); // 0.2%
+const SPREAD = Number(process.env.CONVERT_SPREAD || '0.001'); // 0.1% — the only charge (no fee)
 const QUOTE_TTL_S = 10;
 
 interface Quote {
@@ -33,6 +36,11 @@ export async function convertRoutes(app: FastifyInstance) {
     const pf = usdPrice(fa.symbol);
     const pt = usdPrice(ta.symbol);
     if (!pf || !pt) throw badRequest('No price available for this pair right now');
+    if (config.isLive) {
+      for (const a of [fa, ta]) {
+        if (!a.isFiat && a.symbol !== 'USDT' && !isPriceFresh(`${a.symbol}USDT`)) throw badRequest('Prices are temporarily unavailable — try again shortly');
+      }
+    }
     const fromAmount = new D(q.amount).toDecimalPlaces(fa.precision, D.ROUND_DOWN);
     const usd = fromAmount.toNumber() * pf;
     if (usd < 1) throw badRequest('Minimum convert value is $1');
@@ -58,6 +66,15 @@ export async function convertRoutes(app: FastifyInstance) {
     const rec = await prisma.$transaction(async (tx) => {
       await debitAvailable(tx, q.userId, q.from, new D(q.fromAmount));
       await adjustBalance(tx, q.userId, q.to, new D(q.toAmount));
+      // The house is the counterparty: it receives `from` and pays out `to` from real inventory.
+      const house = getTreasuryId();
+      await adjustBalance(tx, house, q.from, new D(q.fromAmount));
+      if (config.isLive) {
+        const r = await tx.balance.updateMany({ where: { userId: house, asset: q.to, available: { gte: q.toAmount } }, data: { available: { decrement: q.toAmount } } });
+        if (!r.count) throw badRequest(`Convert liquidity for ${q.to} is temporarily low — try a smaller amount`);
+      } else {
+        await adjustBalance(tx, house, q.to, new D(q.toAmount).neg());
+      }
       return tx.convertTrade.create({
         data: { userId: q.userId, fromAsset: q.from, toAsset: q.to, fromAmount: q.fromAmount, toAmount: q.toAmount, price: q.rate },
       });

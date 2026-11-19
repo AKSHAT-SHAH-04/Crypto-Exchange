@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { authenticator } from 'otplib';
+import { requireTotpIfEnabled, sealSecret, verifyTotp } from '../lib/totp.js';
 import QRCode from 'qrcode';
 import { prisma } from '../db.js';
 import { config } from '../config.js';
@@ -30,6 +31,7 @@ export async function accountRoutes(app: FastifyInstance) {
       where: { id: u.id },
       data: { passwordHash: await bcrypt.hash(body.next, 12), tokenVersion: { increment: 1 } },
     });
+    await prisma.apiKey.deleteMany({ where: { userId: u.id } });
     setSession(reply, updated); // keep this device signed in, sign out others
     await audit(req, u.id, 'account.password_changed');
     return { ok: true };
@@ -40,7 +42,7 @@ export async function accountRoutes(app: FastifyInstance) {
     const u = req.user!;
     if (u.totpEnabled) throw badRequest('2FA is already enabled');
     const secret = authenticator.generateSecret();
-    await prisma.user.update({ where: { id: u.id }, data: { totpSecret: secret } });
+    await prisma.user.update({ where: { id: u.id }, data: { totpSecret: sealSecret(secret) } });
     const otpauth = authenticator.keyuri(u.email, config.brand, secret);
     return { secret, otpauth, qr: await QRCode.toDataURL(otpauth) };
   });
@@ -48,7 +50,7 @@ export async function accountRoutes(app: FastifyInstance) {
   app.post('/api/account/2fa/enable', { preHandler: requireSession }, async (req) => {
     const { code } = z.object({ code: code6 }).parse(req.body);
     const u = req.user!;
-    if (!u.totpSecret || !authenticator.check(code, u.totpSecret)) throw badRequest('Invalid code — check your authenticator app');
+    if (!(await verifyTotp(u, code))) throw badRequest('Invalid code — check your authenticator app');
     await prisma.user.update({ where: { id: u.id }, data: { totpEnabled: true } });
     await audit(req, u.id, 'account.2fa_enabled');
     return { ok: true };
@@ -57,7 +59,7 @@ export async function accountRoutes(app: FastifyInstance) {
   app.post('/api/account/2fa/disable', { preHandler: requireSession }, async (req) => {
     const { code } = z.object({ code: code6 }).parse(req.body);
     const u = req.user!;
-    if (!u.totpEnabled || !u.totpSecret || !authenticator.check(code, u.totpSecret)) throw badRequest('Invalid code');
+    if (!u.totpEnabled || !(await verifyTotp(u, code))) throw badRequest('Invalid code');
     await prisma.user.update({ where: { id: u.id }, data: { totpEnabled: false, totpSecret: null } });
     await audit(req, u.id, 'account.2fa_disabled');
     return { ok: true };
@@ -74,13 +76,15 @@ export async function accountRoutes(app: FastifyInstance) {
       .object({
         fullName: z.string().trim().min(3).max(100),
         dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
-        country: z.string().trim().min(2).max(60),
-        idType: z.enum(['PASSPORT', 'NATIONAL_ID', 'DRIVING_LICENSE', 'PAN']),
+        country: z.string().trim().length(2, 'Use a 2-letter country code').toUpperCase(),
+        idType: z.enum(['PASSPORT', 'NATIONAL_ID', 'DRIVING_LICENSE', 'PAN', 'EMIRATES_ID']),
         idNumber: z.string().trim().min(4).max(40),
       })
       .parse(req.body);
     const u = req.user!;
     if (u.kycStatus === 'PENDING' || u.kycStatus === 'APPROVED') throw badRequest(`KYC is already ${u.kycStatus.toLowerCase()}`);
+    if (config.blockedCountries.includes(body.country)) throw badRequest('We are not able to serve residents of this country yet');
+    if (config.allowedCountries.length && !config.allowedCountries.includes(body.country)) throw badRequest('We are not available in your country yet');
     const age = (Date.now() - new Date(body.dateOfBirth).getTime()) / (365.25 * 86400e3);
     if (!(age >= 18)) throw badRequest('You must be at least 18 years old');
     await prisma.$transaction([
@@ -100,7 +104,7 @@ export async function accountRoutes(app: FastifyInstance) {
   app.post('/api/account/api-keys', { preHandler: requireSession }, async (req) => {
     const body = z.object({ label: z.string().trim().min(1).max(40), canTrade: z.boolean().default(false), code: z.string().optional() }).parse(req.body);
     const u = req.user!;
-    if (u.totpEnabled && (!body.code || !authenticator.check(body.code, u.totpSecret!))) throw badRequest('Invalid 2FA code');
+    if (!(await requireTotpIfEnabled(u, body.code))) throw badRequest('Invalid 2FA code');
     if ((await prisma.apiKey.count({ where: { userId: u.id } })) >= 10) throw badRequest('Maximum of 10 API keys');
     const key = `ck_${randomToken(16)}`;
     const secret = randomToken(32);

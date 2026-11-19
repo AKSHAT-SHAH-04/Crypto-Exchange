@@ -4,6 +4,7 @@ import type { User } from '@prisma/client';
 import { config } from '../config.js';
 import { prisma } from '../db.js';
 import { decrypt, hmac, randomToken, safeEqual } from './crypto.js';
+import { redis } from '../redis.js';
 import { forbidden, unauthorized } from './errors.js';
 
 export const SESSION_COOKIE = 'cx_session';
@@ -69,6 +70,9 @@ export async function resolveUser(req: FastifyRequest) {
     const body = req.body ? JSON.stringify(req.body) : '';
     const expected = hmac(decrypt(key.secretEncrypted), `${ts}${req.method}${req.url}${body}`);
     if (!safeEqual(expected, sig)) return;
+    // each signature is single-use within the timestamp window (replay protection)
+    const fresh = await redis.set(`exchange:apisig:${sig}`, '1', 'EX', 60, 'NX');
+    if (fresh !== 'OK') return;
     req.user = key.user;
     req.authVia = 'apikey';
     req.apiKeyCanTrade = key.canTrade;
@@ -93,7 +97,11 @@ export async function resolveUser(req: FastifyRequest) {
 
 export async function requireAuth(req: FastifyRequest) {
   if (!req.user) throw unauthorized();
-  if (req.user.frozen) throw forbidden('Account is frozen. Contact support.');
+  if (req.user.frozen || req.user.frozenByAdmin) throw forbidden('Account is frozen. Contact support.');
+  if (req.user.parentId) {
+    const parent = await prisma.user.findUnique({ where: { id: req.user.parentId }, select: { frozen: true, frozenByAdmin: true } });
+    if (!parent || parent.frozen || parent.frozenByAdmin) throw forbidden('Account is frozen. Contact support.');
+  }
 }
 
 export async function requireTrade(req: FastifyRequest) {

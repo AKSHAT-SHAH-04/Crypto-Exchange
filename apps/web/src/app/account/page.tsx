@@ -112,7 +112,10 @@ function Security() {
   );
 }
 
+const COUNTRY_NAMES: Record<string, string> = { AE: 'United Arab Emirates', IN: 'India', US: 'United States' };
+
 function Kyc() {
+  const meta = useApi<{ allowedCountries: string[] }>('/api/meta');
   const { refresh } = useAuth();
   const kyc = useApi<{ status: string; submission: any }>('/api/account/kyc');
   const { busy, run } = useSubmit();
@@ -134,13 +137,19 @@ function Kyc() {
       <Field label="Full legal name"><input className="input" value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} /></Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Date of birth"><input className="input" type="date" value={f.dateOfBirth} onChange={(e) => setF({ ...f, dateOfBirth: e.target.value })} /></Field>
-        <Field label="Country of residence"><input className="input" value={f.country} onChange={(e) => setF({ ...f, country: e.target.value })} /></Field>
+        <Field label="Country of residence">
+          <select className="input" value={f.country} onChange={(e) => setF({ ...f, country: e.target.value })}>
+            <option value="">Select…</option>
+            {(meta.data?.allowedCountries ?? []).map((c) => <option key={c} value={c}>{COUNTRY_NAMES[c] ?? c}</option>)}
+          </select>
+        </Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="ID type">
           <select className="input" value={f.idType} onChange={(e) => setF({ ...f, idType: e.target.value })}>
             <option value="PASSPORT">Passport</option>
             <option value="NATIONAL_ID">National ID</option>
+            <option value="EMIRATES_ID">Emirates ID</option>
             <option value="DRIVING_LICENSE">Driving licence</option>
             <option value="PAN">PAN card</option>
           </select>

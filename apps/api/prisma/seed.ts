@@ -4,6 +4,14 @@ import bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 const D = Prisma.Decimal;
 
+const isProd = process.env.NODE_ENV === 'production';
+
+const fiat = [
+  { symbol: 'AED', name: 'UAE Dirham', precision: 2, networks: ['BANK'], minWithdraw: 50, withdrawFee: 0, isFiat: true },
+  { symbol: 'INR', name: 'Indian Rupee', precision: 2, networks: ['BANK'], minWithdraw: 1000, withdrawFee: 0, isFiat: true },
+  { symbol: 'USD', name: 'US Dollar', precision: 2, networks: ['BANK'], minWithdraw: 20, withdrawFee: 0, isFiat: true },
+];
+
 const assets = [
   { symbol: 'USDT', name: 'Tether', precision: 6, networks: ['TRC20', 'ERC20', 'BEP20'], minWithdraw: 10, withdrawFee: 1 },
   { symbol: 'BTC', name: 'Bitcoin', precision: 8, networks: ['BTC', 'BEP20'], minWithdraw: 0.0005, withdrawFee: 0.0002 },
@@ -37,7 +45,7 @@ const pairs = [
 ];
 
 async function main() {
-  for (const a of assets) {
+  for (const a of [...assets, ...fiat]) {
     const data = { ...a, minWithdraw: new D(a.minWithdraw), withdrawFee: new D(a.withdrawFee) };
     await prisma.asset.upsert({ where: { symbol: a.symbol }, create: data, update: data });
   }
@@ -47,19 +55,43 @@ async function main() {
     await prisma.pair.upsert({ where: { symbol }, create: { symbol, ...data }, update: data });
   }
 
+  if (isProd) {
+    // Production: no demo users or well-known passwords. Create the first admin from env, once.
+    const email = process.env.SEED_ADMIN_EMAIL;
+    const password = process.env.SEED_ADMIN_PASSWORD;
+    if (email && password) {
+      if (password.length < 14) throw new Error('SEED_ADMIN_PASSWORD must be at least 14 characters');
+      await prisma.user.upsert({
+        where: { email: email.toLowerCase() },
+        create: { email: email.toLowerCase(), name: 'Admin', passwordHash: await bcrypt.hash(password, 12), role: 'ADMIN', emailVerified: true },
+        update: {},
+      });
+      console.log(`Admin ${email} ensured. Log in and enable 2FA immediately.`);
+    }
+    console.log('Seeded assets and pairs (production: demo data skipped).');
+    return;
+  }
+
   const pw = await bcrypt.hash('Admin@12345', 12);
   const admin = await prisma.user.upsert({
     where: { email: 'admin@example.com' },
-    create: { email: 'admin@example.com', name: 'Admin', passwordHash: pw, role: 'ADMIN', emailVerified: true, kycStatus: 'APPROVED' },
+    create: { email: 'admin@example.com', name: 'Admin', passwordHash: pw, role: 'ADMIN', emailVerified: true, kycStatus: 'APPROVED', country: 'AE' },
     update: { role: 'ADMIN' },
   });
 
   const demoPw = await bcrypt.hash('Demo@12345', 12);
   const demo = await prisma.user.upsert({
     where: { email: 'demo@example.com' },
-    create: { email: 'demo@example.com', name: 'Demo Trader', passwordHash: demoPw, emailVerified: true, kycStatus: 'APPROVED' },
-    update: {},
+    create: { email: 'demo@example.com', name: 'Demo Trader', passwordHash: demoPw, emailVerified: true, kycStatus: 'APPROVED', country: 'AE' },
+    update: { country: 'AE' },
   });
+
+  // demo users get an approved KYC record so fiat/P2P flows work out of the box
+  for (const [u, name, country] of [[admin, 'Admin User', 'AE'], [demo, 'Demo Trader', 'AE']] as const) {
+    if (!(await prisma.kycSubmission.count({ where: { userId: u.id } }))) {
+      await prisma.kycSubmission.create({ data: { userId: u.id, fullName: name, dateOfBirth: '1990-01-01', country, idType: 'EMIRATES_ID', idNumber: '784199012345678', status: 'APPROVED', reviewedAt: new Date() } });
+    }
+  }
 
   for (const [userId, asset, amount] of [
     [admin.id, 'USDT', 10000],
@@ -77,8 +109,8 @@ async function main() {
   // ---- P2P demo merchant with live ads so the marketplace isn't empty ----
   const merchant = await prisma.user.upsert({
     where: { email: 'merchant@example.com' },
-    create: { email: 'merchant@example.com', name: 'QuickPay Merchant', passwordHash: demoPw, emailVerified: true, kycStatus: 'APPROVED' },
-    update: {},
+    create: { email: 'merchant@example.com', name: 'QuickPay Merchant', passwordHash: demoPw, emailVerified: true, kycStatus: 'APPROVED', country: 'IN' },
+    update: { country: 'IN' },
   });
   if (!(await prisma.p2PAd.count({ where: { userId: merchant.id } }))) {
     await prisma.balance.upsert({

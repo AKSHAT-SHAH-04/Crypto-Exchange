@@ -6,26 +6,32 @@ import { useT } from '@/lib/i18n';
 export function Footer() {
   const { t } = useT();
   const cols = [
-    { title: 'Products', links: [['/markets', t('nav.markets')], ['/trade/BTCUSDT', t('nav.trade')], ['/convert', t('nav.convert')], ['/p2p', t('nav.p2p')]] },
-    { title: 'Support', links: [['/support', t('nav.support')], ['/announcements', t('nav.announcements')], ['/account?tab=fees', t('nav.fees')], ['/account?tab=api', 'API']] },
+    { title: 'Trade', links: [['/markets', t('nav.markets')], ['/trade/BTCUSDT', 'Spot trading'], ['/convert', t('nav.convert')], ['/p2p', 'P2P']] },
+    { title: 'Account', links: [['/wallet', t('nav.wallet')], ['/account?tab=security', 'Security'], ['/account?tab=fees', t('nav.fees')], ['/sub-accounts', t('nav.subaccounts')]] },
+    { title: 'Support', links: [['/support', 'Help center'], ['/announcements', t('nav.announcements')], ['/account?tab=api', 'API']] },
   ];
   return (
-    <footer className="mt-12 border-t border-line">
-      <div className="mx-auto grid max-w-[1200px] gap-8 px-4 py-10 sm:grid-cols-3">
-        <div>
-          <div className="font-bold">{brand}</div>
-          <p className="mt-2 text-sm text-muted">Trading crypto carries risk. Paper trading mode uses demo funds only.</p>
+    <footer className="mt-16 bg-section text-xs text-muted">
+      <div className="mx-auto max-w-[1000px] px-6 py-8">
+        <p className="border-b border-line pb-4 leading-relaxed">
+          Crypto assets are volatile and you can lose some or all of the money you invest. Paper trading mode uses demo funds only. Services are
+          available in the United Arab Emirates and India only, subject to identity verification, and are not offered to US persons.
+        </p>
+        <div className="grid gap-6 py-6 sm:grid-cols-3">
+          {cols.map((c) => (
+            <div key={c.title}>
+              <div className="mb-2 font-semibold text-fg">{c.title}</div>
+              <ul className="space-y-1.5">
+                {c.links.map(([href, label]) => <li key={href}><Link href={href} className="hover:text-fg hover:underline">{label}</Link></li>)}
+              </ul>
+            </div>
+          ))}
         </div>
-        {cols.map((c) => (
-          <div key={c.title}>
-            <div className="mb-3 text-sm font-semibold">{c.title}</div>
-            <ul className="space-y-2 text-sm text-muted">
-              {c.links.map(([href, label]) => <li key={href}><Link href={href} className="hover:text-fg">{label}</Link></li>)}
-            </ul>
-          </div>
-        ))}
+        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line pt-4">
+          <span>Copyright © {new Date().getFullYear()} {brand}. All rights reserved.</span>
+          <span className="sm:ml-auto">United Arab Emirates · India</span>
+        </div>
       </div>
-      <div className="border-t border-line py-4 text-center text-xs text-muted">© {new Date().getFullYear()} {brand}</div>
     </footer>
   );
 }

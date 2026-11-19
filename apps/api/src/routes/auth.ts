@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { authenticator } from 'otplib';
 import { prisma, D } from '../db.js';
 import { config } from '../config.js';
 import {
@@ -12,6 +11,8 @@ import { audit } from '../lib/audit.js';
 import { emails } from '../lib/email.js';
 import { consumeToken, issueToken } from '../lib/tokens.js';
 import { randomToken } from '../lib/crypto.js';
+import { verifyTotp } from '../lib/totp.js';
+import { redis } from '../redis.js';
 
 export const passwordSchema = z
   .string()
@@ -69,9 +70,9 @@ export async function authRoutes(app: FastifyInstance) {
       await audit(req, user?.id ?? null, 'auth.login_failed', { email: body.email });
       throw unauthorized('Invalid email or password');
     }
-    if (user.frozen) throw unauthorized('Account is frozen. Contact support.');
+    if (user.frozen || user.frozenByAdmin) throw unauthorized('Account is frozen. Contact support.');
     if (user.totpEnabled) {
-      return { twoFactorRequired: true, ticket: signJwt(user.id, '2fa', {}, 300) };
+      return { twoFactorRequired: true, ticket: signJwt(user.id, '2fa', { jti: randomToken(12) }, 300) };
     }
     setSession(reply, user);
     await audit(req, user.id, 'auth.login');
@@ -81,12 +82,20 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/api/auth/login/2fa', strictLimit, async (req, reply) => {
     const body = z.object({ ticket: z.string(), code: z.string().regex(/^\d{6}$/) }).parse(req.body);
     const p = verifyJwt(body.ticket, '2fa');
-    if (!p) throw unauthorized('Login session expired, please sign in again');
+    if (!p?.jti) throw unauthorized('Login session expired, please sign in again');
+    // at most 5 attempts per login ticket and 10 failures per account per 15 minutes
+    const ticketTries = await redis.incr(`exchange:2fa:ticket:${p.jti}`);
+    await redis.expire(`exchange:2fa:ticket:${p.jti}`, 300);
+    const acctKey = `exchange:2fa:fail:${p.sub}`;
+    const acctFails = Number((await redis.get(acctKey)) ?? 0);
+    if (ticketTries > 5 || acctFails >= 10) throw unauthorized('Too many attempts. Please wait and sign in again.');
     const user = await prisma.user.findUnique({ where: { id: p.sub } });
-    if (!user?.totpSecret || !authenticator.check(body.code, user.totpSecret)) {
+    if (!user || !(await verifyTotp(user, body.code))) {
+      await redis.multi().incr(acctKey).expire(acctKey, 900).exec();
       await audit(req, p.sub, 'auth.2fa_failed');
       throw unauthorized('Invalid authentication code');
     }
+    await redis.del(acctKey);
     setSession(reply, user);
     await audit(req, user.id, 'auth.login', { twoFactor: true });
     return { user: publicUser(user) };
@@ -100,7 +109,10 @@ export async function authRoutes(app: FastifyInstance) {
 
   /** Signs out every device by bumping tokenVersion. */
   app.post('/api/auth/logout-all', { preHandler: requireSession }, async (req, reply) => {
-    await prisma.user.update({ where: { id: req.user!.id }, data: { tokenVersion: { increment: 1 } } });
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: req.user!.id }, data: { tokenVersion: { increment: 1 } } }),
+      prisma.apiKey.deleteMany({ where: { userId: req.user!.id } }),
+    ]);
     await audit(req, req.user!.id, 'auth.logout_all');
     clearSession(reply);
     return { ok: true };
@@ -135,10 +147,14 @@ export async function authRoutes(app: FastifyInstance) {
     const body = z.object({ token: z.string().min(10), password: passwordSchema }).parse(req.body);
     const rec = await consumeToken(body.token, 'RESET_PASSWORD');
     if (!rec) throw badRequest('This reset link is invalid or has expired');
-    await prisma.user.update({
-      where: { id: rec.userId },
-      data: { passwordHash: await bcrypt.hash(body.password, 12), tokenVersion: { increment: 1 } },
-    });
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: rec.userId },
+        data: { passwordHash: await bcrypt.hash(body.password, 12), tokenVersion: { increment: 1 } },
+      }),
+      // a reset means the account may have been compromised: revoke programmatic access too
+      prisma.apiKey.deleteMany({ where: { userId: rec.userId } }),
+    ]);
     await audit(req, rec.userId, 'auth.password_reset');
     return { ok: true };
   });
@@ -191,11 +207,22 @@ export async function authRoutes(app: FastifyInstance) {
       user = await createUser({ email: info.email.toLowerCase(), name: info.name, googleId: info.sub, emailVerified: true });
       await audit(req, user.id, 'auth.register', { via: 'google' });
     } else if (!user.googleId) {
-      user = await prisma.user.update({ where: { id: user.id }, data: { googleId: info.sub, emailVerified: true } });
+      if (!user.emailVerified) {
+        // Someone registered this email without proving they own it. The Google owner takes the account over:
+        // drop the unverified password, sessions and API keys so the original registrant is locked out.
+        await prisma.apiKey.deleteMany({ where: { userId: user.id } });
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: { googleId: info.sub, emailVerified: true, passwordHash: null, totpEnabled: false, totpSecret: null, tokenVersion: { increment: 1 } },
+        });
+        await audit(req, user.id, 'auth.google_claimed_unverified_account');
+      } else {
+        user = await prisma.user.update({ where: { id: user.id }, data: { googleId: info.sub } });
+      }
     }
-    if (user.frozen) return fail('Account is frozen');
+    if (user.frozen || user.frozenByAdmin) return fail('Account is frozen');
     if (user.totpEnabled) {
-      const ticket = signJwt(user.id, '2fa', {}, 300);
+      const ticket = signJwt(user.id, '2fa', { jti: randomToken(12) }, 300);
       return reply.redirect(`${config.webUrl}/login?ticket=${encodeURIComponent(ticket)}`);
     }
     setSession(reply, user);

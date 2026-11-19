@@ -47,6 +47,9 @@ enum TxType {
 enum TxStatus {
   AWAITING_EMAIL
   PENDING_APPROVAL
+  /// Pending on-chain confirmations / bank settlement / sent to the custodian
+  PROCESSING
+  FAILED
   COMPLETED
   REJECTED
   CANCELED
@@ -74,6 +77,8 @@ model User {
   emailVerified   Boolean   @default(false)
   role            Role      @default(USER)
   frozen          Boolean   @default(false)
+  /// Set by admins; sub-account owners cannot clear it
+  frozenByAdmin   Boolean   @default(false)
   totpSecret      String?
   totpEnabled     Boolean   @default(false)
   tokenVersion    Int       @default(0)
@@ -85,6 +90,8 @@ model User {
   /// Set for sub-accounts: the master account that owns this one
   parentId        String?
   subLabel        String?
+  /// ISO-3166 alpha-2 country of residence, set from KYC
+  country         String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -95,6 +102,9 @@ model User {
   tickets         SupportTicket[]
   converts        ConvertTrade[]
   paymentMethods  P2PPaymentMethod[]
+  depositAddresses DepositAddress[]
+  bankAccounts    BankAccount[]
+  rampOrders      RampOrder[]
   p2pAds          P2PAd[]
 
   balances        Balance[]
@@ -116,6 +126,8 @@ model Asset {
   minWithdraw Decimal @default(0) @db.Decimal(36, 18)
   withdrawFee Decimal @default(0) @db.Decimal(36, 18)
   enabled    Boolean  @default(true)
+  /// Fiat currencies (AED, INR, USD) are held as balances and moved over bank rails, not blockchains
+  isFiat     Boolean  @default(false)
 }
 
 model Pair {
@@ -205,6 +217,13 @@ model Transaction {
   address     String?
   txHash      String?
   note        String?
+  /// CRYPTO | BANK
+  rail        String    @default("CRYPTO")
+  /// custodian / bank partner that processed it (demo, fireblocks, bank:<id>)
+  provider    String?
+  /// The provider's id for this movement; unique so webhooks are idempotent
+  providerRef String?   @unique
+  bankAccountId String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -486,4 +505,76 @@ model P2PMessage {
   order     P2POrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId, createdAt])
+}
+
+// ---------------- Custody & fiat rails ----------------
+
+/// A real on-chain deposit address issued by the custodian for one user/asset/network.
+model DepositAddress {
+  id          String   @id @default(cuid())
+  userId      String
+  asset       String
+  network     String
+  address     String
+  tag         String?
+  provider    String
+  providerRef String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, asset, network])
+  @@unique([provider, network, address, tag])
+}
+
+/// A user's own bank account for fiat withdrawals (must be in the KYC'd name).
+model BankAccount {
+  id        String   @id @default(cuid())
+  userId    String
+  currency  String
+  country   String
+  holder    String
+  label     String
+  /// IBAN/SWIFT (AE), account+IFSC (IN), routing+account (US)
+  details   Json
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Per-user reference that must be quoted on incoming bank transfers so deposits can be matched.
+model FiatDepositRef {
+  userId    String
+  currency  String
+  reference String   @unique
+  createdAt DateTime @default(now())
+
+  @@id([userId, currency])
+}
+
+enum RampSide {
+  BUY
+  SELL
+}
+
+/// A buy/sell session opened with an on-ramp/off-ramp partner. Funds are only ever credited
+/// from custodian-confirmed on-chain deposits; this record is for tracking/UX.
+model RampOrder {
+  id              String   @id @default(cuid())
+  userId          String
+  provider        String
+  side            RampSide
+  fiatCurrency    String
+  fiatAmount      Decimal? @db.Decimal(36, 2)
+  asset           String
+  network         String
+  cryptoAmount    Decimal? @db.Decimal(36, 18)
+  walletAddress   String?
+  status          String   @default("CREATED")
+  providerOrderId String?  @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }

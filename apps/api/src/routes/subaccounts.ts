@@ -64,6 +64,8 @@ export async function subAccountRoutes(app: FastifyInstance) {
     if (b.fromId === b.toId) throw badRequest('Choose two different accounts');
     const family = new Set([master.id, ...(await prisma.user.findMany({ where: { parentId: master.id }, select: { id: true } })).map((u) => u.id)]);
     if (!family.has(b.fromId) || !family.has(b.toId)) throw notFound('Account not found');
+    const frozen = await prisma.user.count({ where: { id: { in: [b.fromId, b.toId] }, OR: [{ frozen: true }, { frozenByAdmin: true }] } });
+    if (frozen) throw forbidden('Transfers to or from a frozen account are not allowed');
     const asset = await prisma.asset.findUnique({ where: { symbol: b.asset } });
     if (!asset) throw badRequest('Unknown asset');
     const amount = new D(b.amount).toDecimalPlaces(asset.precision, D.ROUND_DOWN);
@@ -87,8 +89,11 @@ export async function subAccountRoutes(app: FastifyInstance) {
   app.patch('/api/subaccounts/:id', { preHandler: requireSession }, async (req) => {
     const master = await masterOf(req);
     const { frozen } = z.object({ frozen: z.boolean() }).parse(req.body);
-    const r = await prisma.user.updateMany({ where: { id: (req.params as any).id, parentId: master.id }, data: { frozen, tokenVersion: { increment: 1 } } });
-    if (!r.count) throw notFound();
+    const r = await prisma.user.updateMany({
+      where: { id: (req.params as any).id, parentId: master.id, frozenByAdmin: false },
+      data: { frozen, tokenVersion: { increment: 1 } },
+    });
+    if (!r.count) throw notFound('Sub-account not found (or frozen by support)');
     return { ok: true };
   });
 

@@ -96,8 +96,8 @@ function OrderView({ id }: { id: string }) {
             ))}
           </ol>
           <div className="mt-5 grid grid-cols-3 gap-4 text-sm">
-            <div><div className="text-xs text-muted">Fiat amount</div><div className="num text-lg font-semibold text-up">₹{fmt(d.fiatAmount, 2)}</div></div>
-            <div><div className="text-xs text-muted">Price</div><div className="num">₹{fmt(d.price, 2)}</div></div>
+            <div><div className="text-xs text-muted">Fiat amount</div><div className="num text-lg font-semibold text-up">{d.fiat === 'INR' ? '₹' : 'AED '}{fmt(d.fiatAmount, 2)}</div></div>
+            <div><div className="text-xs text-muted">Price</div><div className="num">{d.fiat === 'INR' ? '₹' : 'AED '}{fmt(d.price, 2)}</div></div>
             <div><div className="text-xs text-muted">Crypto</div><div className="num">{fmtQty(d.amount, 8)} {d.asset}</div></div>
           </div>
         </div>
@@ -134,7 +134,7 @@ function OrderView({ id }: { id: string }) {
           {!isBuyer && d.status === 'PAID' && (
             <>
               {user?.totpEnabled && <input className="input num w-32" placeholder="2FA code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} />}
-              <button className="btn-up" disabled={busy} onClick={() => confirm(`Confirm you received ₹${d.fiatAmount} in your account. This releases ${d.amount} ${d.asset} and cannot be undone.`) && act('release', { code: code || undefined }, 'Crypto released')}>
+              <button className="btn-up" disabled={busy} onClick={() => confirm(`Confirm you received ${d.fiatAmount} ${d.fiat} in your account. This releases ${d.amount} ${d.asset} and cannot be undone.`) && act('release', { code: code || undefined }, 'Crypto released')}>
                 Payment received, release {d.asset}
               </button>
             </>

@@ -9,7 +9,7 @@ import { api, errMsg } from '@/lib/api';
 import { useApi } from '@/lib/hooks';
 import { fmt, fmtDateTime, fmtQty } from '@/lib/format';
 
-type Tab = 'dashboard' | 'users' | 'kyc' | 'withdrawals' | 'p2p' | 'support' | 'markets' | 'announcements' | 'audit';
+type Tab = 'dashboard' | 'users' | 'kyc' | 'withdrawals' | 'fiat' | 'p2p' | 'support' | 'markets' | 'announcements' | 'audit';
 
 function useAction() {
   const toast = useToast();
@@ -163,7 +163,7 @@ function Withdrawals() {
   return (
     <div className="space-y-3">
       <select className="input w-56" value={status} onChange={(e) => setStatus(e.target.value)}>
-        {['PENDING_APPROVAL', 'AWAITING_EMAIL', 'COMPLETED', 'REJECTED', 'CANCELED'].map((s) => <option key={s}>{s}</option>)}
+        {['PENDING_APPROVAL', 'PROCESSING', 'AWAITING_EMAIL', 'COMPLETED', 'FAILED', 'REJECTED', 'CANCELED'].map((s) => <option key={s}>{s}</option>)}
       </select>
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[860px] text-sm">
@@ -444,6 +444,80 @@ function P2PDisputes() {
   );
 }
 
+function FiatOps() {
+  const act = useAction();
+  const held = useApi<any[]>('/api/admin/fiat/held');
+  const payouts = useApi<any[]>('/api/admin/withdrawals?status=PROCESSING');
+  const bankPayouts = (payouts.data ?? []).filter((w) => w.rail === 'BANK');
+  const [f, setF] = useState({ reference: '', currency: 'AED', amount: '', bankTxnId: '', senderName: '' });
+  const [refs, setRefs] = useState<Record<string, string>>({});
+  return (
+    <div className="space-y-6">
+      <div className="card space-y-3 p-5">
+        <h3 className="font-semibold">Credit a bank deposit (manual reconciliation)</h3>
+        <p className="text-xs text-muted">Use when the bank partner has no webhook: match a statement line by the customer's reference code. Each bank transaction ID can only be credited once.</p>
+        <div className="grid gap-2 sm:grid-cols-5">
+          <input className="input" placeholder="Reference (CX…)" value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value.toUpperCase() })} />
+          <select className="input" value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })}>{['AED', 'INR', 'USD'].map((c) => <option key={c}>{c}</option>)}</select>
+          <input className="input num" placeholder="Amount" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+          <input className="input" placeholder="Bank transaction ID" value={f.bankTxnId} onChange={(e) => setF({ ...f, bankTxnId: e.target.value })} />
+          <input className="input" placeholder="Sender name" value={f.senderName} onChange={(e) => setF({ ...f, senderName: e.target.value })} />
+        </div>
+        <button className="btn-brand" disabled={!f.reference || !+f.amount || !f.bankTxnId} onClick={() => act(() => api('/api/admin/fiat/deposits', { method: 'POST', body: { ...f, senderName: f.senderName || undefined } }), 'Deposit credited', () => setF({ ...f, amount: '', bankTxnId: '', senderName: '' }))}>Credit deposit</button>
+      </div>
+
+      <div className="card overflow-x-auto">
+        <h3 className="border-b border-line px-4 py-3 font-semibold">Deposits held for compliance review</h3>
+        <table className="w-full min-w-[700px] text-sm">
+          <Th cols={['Received', 'User', 'Amount', 'Reason', '']} />
+          <tbody>
+            {held.data?.map((t) => (
+              <tr key={t.id} className="border-b border-line/50 last:border-0">
+                <td className="px-4 py-2 text-xs text-muted">{fmtDateTime(t.createdAt)}</td>
+                <td className="px-4">{t.user.email}</td>
+                <td className="num px-4">{fmt(t.amount, 2)} {t.asset}</td>
+                <td className="px-4 text-xs text-muted">{t.note}</td>
+                <td className="whitespace-nowrap px-4 text-right text-xs">
+                  <button className="mr-3 text-up" onClick={() => act(() => api(`/api/admin/fiat/held/${t.id}`, { method: 'POST', body: { decision: 'APPROVE' } }), 'Credited', held.reload)}>Approve & credit</button>
+                  <button className="text-down" onClick={() => confirm('Reject? The funds must be returned to the sender by bank.') && act(() => api(`/api/admin/fiat/held/${t.id}`, { method: 'POST', body: { decision: 'REJECT' } }), 'Rejected', held.reload)}>Reject</button>
+                </td>
+              </tr>
+            ))}
+            {!held.data?.length && <tr><td colSpan={5} className="p-8 text-center text-muted">Nothing held</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card overflow-x-auto">
+        <h3 className="border-b border-line px-4 py-3 font-semibold">Bank payouts to execute</h3>
+        <table className="w-full min-w-[860px] text-sm">
+          <Th cols={['Approved', 'User', 'Pay out', 'To', 'Bank ref', '']} />
+          <tbody>
+            {bankPayouts.map((w) => (
+              <tr key={w.id} className="border-b border-line/50 last:border-0">
+                <td className="px-4 py-2 text-xs text-muted">{fmtDateTime(w.updatedAt)}</td>
+                <td className="px-4">{w.user.email}</td>
+                <td className="num px-4 font-semibold">{fmt(+w.amount - +w.fee, 2)} {w.asset}</td>
+                <td className="px-4 text-xs">
+                  {w.bankAccount ? (
+                    <><b>{w.bankAccount.holder}</b><div className="num text-muted">{Object.values(w.bankAccount.details).join(' · ')}</div></>
+                  ) : w.address}
+                </td>
+                <td className="px-4"><input className="input num w-36 py-1 text-xs" placeholder="UTR / FT ref" value={refs[w.id] ?? ''} onChange={(e) => setRefs({ ...refs, [w.id]: e.target.value })} /></td>
+                <td className="whitespace-nowrap px-4 text-right text-xs">
+                  <button className="mr-3 text-up" disabled={!refs[w.id]} onClick={() => act(() => api(`/api/admin/fiat/payouts/${w.id}`, { method: 'POST', body: { status: 'COMPLETED', bankRef: refs[w.id] } }), 'Marked as paid', payouts.reload)}>Mark paid</button>
+                  <button className="text-down" onClick={() => { const r = prompt('Failure reason?'); if (r) act(() => api(`/api/admin/fiat/payouts/${w.id}`, { method: 'POST', body: { status: 'FAILED', reason: r } }), 'Marked failed, funds returned', payouts.reload); }}>Failed</button>
+                </td>
+              </tr>
+            ))}
+            {!bankPayouts.length && <tr><td colSpan={6} className="p-8 text-center text-muted">No payouts waiting</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('dashboard');
   return (
@@ -459,6 +533,7 @@ export default function AdminPage() {
             { id: 'users', label: 'Users' },
             { id: 'kyc', label: 'KYC' },
             { id: 'withdrawals', label: 'Withdrawals' },
+            { id: 'fiat', label: 'Fiat & bank' },
             { id: 'p2p', label: 'P2P disputes' },
             { id: 'support', label: 'Support' },
             { id: 'markets', label: 'Markets & fees' },
@@ -470,6 +545,7 @@ export default function AdminPage() {
         {tab === 'users' && <Users />}
         {tab === 'kyc' && <KycQueue />}
         {tab === 'withdrawals' && <Withdrawals />}
+        {tab === 'fiat' && <FiatOps />}
         {tab === 'p2p' && <P2PDisputes />}
         {tab === 'support' && <SupportInbox />}
         {tab === 'markets' && <Markets />}

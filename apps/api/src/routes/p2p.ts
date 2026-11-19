@@ -11,7 +11,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { authenticator } from 'otplib';
+import { requireTotpIfEnabled } from '../lib/totp.js';
 import type { P2POrder, Prisma, User } from '@prisma/client';
 import { prisma, D } from '../db.js';
 import { publish } from '../redis.js';
@@ -23,13 +23,15 @@ import { adjustBalance, lockFunds, notifyUser } from '../engine/engine.js';
 
 type Tx = Prisma.TransactionClient;
 
-const PAYMENT_TYPES = ['UPI', 'IMPS', 'BANK', 'PAYTM'] as const;
+const PAYMENT_TYPES = ['UPI', 'IMPS', 'BANK', 'PAYTM', 'AANI', 'UAE_BANK'] as const;
 const ACTIVE = ['PENDING_PAYMENT', 'PAID', 'DISPUTED'] as const;
 
 const paymentDetails = {
   UPI: z.object({ upiId: z.string().trim().regex(/^[\w.\-]{2,}@[a-zA-Z]{2,}$/, 'Invalid UPI ID'), name: z.string().trim().min(2).max(80) }),
   PAYTM: z.object({ phone: z.string().trim().regex(/^\d{10}$/, '10-digit phone number'), name: z.string().trim().min(2).max(80) }),
   BANK: z.object({ accountNumber: z.string().trim().regex(/^\d{6,18}$/), ifsc: z.string().trim().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Invalid IFSC'), name: z.string().trim().min(2).max(80), bank: z.string().trim().min(2).max(60) }),
+  AANI: z.object({ phoneOrAlias: z.string().trim().min(5).max(60), name: z.string().trim().min(2).max(80) }),
+  UAE_BANK: z.object({ iban: z.string().trim().toUpperCase().regex(/^AE\d{21}$/, 'UAE IBAN must be AE + 21 digits'), name: z.string().trim().min(2).max(80), bank: z.string().trim().min(2).max(60) }),
   IMPS: z.object({ accountNumber: z.string().trim().regex(/^\d{6,18}$/), ifsc: z.string().trim().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Invalid IFSC'), name: z.string().trim().min(2).max(80), bank: z.string().trim().min(2).max(60) }),
 };
 
@@ -140,17 +142,18 @@ export async function p2pRoutes(app: FastifyInstance) {
   app.get('/api/p2p/ads', async (req) => {
     const q = z
       .object({
-        // what the *taker* wants to do
+        // what the *taker* wants to do (amount filter must be a real number)
         side: z.enum(['BUY', 'SELL']).default('BUY'),
         asset: z.string().default('USDT'),
         payment: z.enum(PAYMENT_TYPES).optional(),
-        amount: z.coerce.number().positive().optional(),
+        fiat: z.enum(['INR', 'AED']).default('INR'),
+        amount: z.coerce.number().finite().positive().optional(),
       })
       .parse(req.query);
     const adSide = q.side === 'BUY' ? 'SELL' : 'BUY';
     const ads = await prisma.p2PAd.findMany({
       where: {
-        status: 'ONLINE', side: adSide, asset: q.asset, remaining: { gt: 0 },
+        status: 'ONLINE', side: adSide, asset: q.asset, fiat: q.fiat, remaining: { gt: 0 },
         ...(q.payment ? { paymentTypes: { has: q.payment } } : {}),
         ...(q.amount ? { minFiat: { lte: q.amount }, maxFiat: { gte: q.amount } } : {}),
         user: { frozen: false },
@@ -184,10 +187,11 @@ export async function p2pRoutes(app: FastifyInstance) {
       .object({
         side: z.enum(['BUY', 'SELL']),
         asset: z.string(),
-        price: z.coerce.number().positive(),
-        totalAmount: z.coerce.number().positive(),
-        minFiat: z.coerce.number().min(100),
-        maxFiat: z.coerce.number().positive(),
+        fiat: z.enum(['INR', 'AED']).default('INR'),
+        price: z.coerce.number().finite().min(0.01).max(1e9),
+        totalAmount: z.coerce.number().finite().positive().max(1e9),
+        minFiat: z.coerce.number().finite().min(100).max(1e9),
+        maxFiat: z.coerce.number().finite().positive().max(1e9),
         paymentTypes: z.array(z.enum(PAYMENT_TYPES)).min(1),
         terms: z.string().trim().max(1000).optional(),
         payWindowMin: z.coerce.number().int().min(15).max(120).default(15),
@@ -208,7 +212,7 @@ export async function p2pRoutes(app: FastifyInstance) {
       if (b.side === 'SELL') await lockFunds(tx, u.id, asset.symbol, total);
       return tx.p2PAd.create({
         data: {
-          userId: u.id, side: b.side, asset: asset.symbol, price: new D(b.price).toDecimalPlaces(2), totalAmount: total, remaining: total,
+          userId: u.id, side: b.side, asset: asset.symbol, fiat: b.fiat, price: new D(b.price).toDecimalPlaces(2), totalAmount: total, remaining: total,
           minFiat: b.minFiat, maxFiat: b.maxFiat, paymentTypes: b.paymentTypes, terms: b.terms, payWindowMin: b.payWindowMin,
         },
       });
@@ -219,7 +223,7 @@ export async function p2pRoutes(app: FastifyInstance) {
   });
 
   app.patch('/api/p2p/ads/:id', { preHandler: requireSession }, async (req) => {
-    const b = z.object({ status: z.enum(['ONLINE', 'OFFLINE']).optional(), price: z.coerce.number().positive().optional() }).parse(req.body);
+    const b = z.object({ status: z.enum(['ONLINE', 'OFFLINE']).optional(), price: z.coerce.number().finite().min(0.01).max(1e9).optional() }).parse(req.body);
     const r = await prisma.p2PAd.updateMany({
       where: { id: (req.params as any).id, userId: req.user!.id, status: { not: 'CLOSED' } },
       data: { ...(b.status ? { status: b.status } : {}), ...(b.price ? { price: new D(b.price).toDecimalPlaces(2) } : {}) },
@@ -232,10 +236,13 @@ export async function p2pRoutes(app: FastifyInstance) {
   app.delete('/api/p2p/ads/:id', { preHandler: requireSession }, async (req) => {
     const id = (req.params as any).id;
     await prisma.$transaction(async (tx) => {
-      const ad = await tx.p2PAd.findFirst({ where: { id, userId: req.user!.id, status: { not: 'CLOSED' } } });
-      if (!ad) throw notFound();
+      // Flip status first: the UPDATE row-locks the ad, so concurrent order creation (which also updates the
+      // row, conditioned on status=ONLINE) either commits before us or fails after us. Then read `remaining`.
+      const r = await tx.p2PAd.updateMany({ where: { id, userId: req.user!.id, status: { not: 'CLOSED' } }, data: { status: 'CLOSED' } });
+      if (!r.count) throw notFound();
       if (await tx.p2POrder.count({ where: { adId: id, status: { in: [...ACTIVE] } } })) throw badRequest('Ad has active orders; finish them first');
-      await tx.p2PAd.update({ where: { id }, data: { status: 'CLOSED', remaining: 0 } });
+      const ad = await tx.p2PAd.findUniqueOrThrow({ where: { id } });
+      await tx.p2PAd.update({ where: { id }, data: { remaining: 0 } });
       if (ad.side === 'SELL' && ad.remaining.gt(0)) await adjustBalance(tx, ad.userId, ad.asset, ad.remaining, ad.remaining.neg());
     });
     notifyUser(req.user!.id);
@@ -244,7 +251,7 @@ export async function p2pRoutes(app: FastifyInstance) {
 
   // ---------- orders ----------
   app.post('/api/p2p/orders', { preHandler: requireSession, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
-    const b = z.object({ adId: z.string(), fiatAmount: z.coerce.number().positive() }).parse(req.body);
+    const b = z.object({ adId: z.string(), fiatAmount: z.coerce.number().finite().positive().max(1e9) }).parse(req.body);
     const u = req.user!;
     requireP2PUser(u);
     if ((await prisma.p2POrder.count({ where: { OR: [{ buyerId: u.id }, { sellerId: u.id }], status: 'PENDING_PAYMENT' } })) >= 3)
@@ -254,10 +261,10 @@ export async function p2pRoutes(app: FastifyInstance) {
       if (!ad || ad.status !== 'ONLINE' || ad.user.frozen) throw badRequest('This ad is no longer available');
       if (ad.userId === u.id) throw badRequest("You can't trade with your own ad");
       const fiat = new D(b.fiatAmount).toDecimalPlaces(2, D.ROUND_DOWN);
-      if (fiat.lt(ad.minFiat) || fiat.gt(ad.maxFiat)) throw badRequest(`Amount must be between ₹${ad.minFiat} and ₹${ad.maxFiat}`);
+      if (fiat.lt(ad.minFiat) || fiat.gt(ad.maxFiat)) throw badRequest(`Amount must be between ${ad.minFiat} and ${ad.maxFiat} ${ad.fiat}`);
       const amount = fiat.div(ad.price).toDecimalPlaces(8, D.ROUND_DOWN);
       if (amount.lte(0)) throw badRequest('Amount too small');
-      const r = await tx.p2PAd.updateMany({ where: { id: ad.id, remaining: { gte: amount } }, data: { remaining: { decrement: amount } } });
+      const r = await tx.p2PAd.updateMany({ where: { id: ad.id, status: 'ONLINE', remaining: { gte: amount } }, data: { remaining: { decrement: amount } } });
       if (!r.count) throw badRequest('Not enough left on this ad — try a smaller amount');
       const takerIsBuyer = ad.side === 'SELL';
       if (!takerIsBuyer) {
@@ -272,11 +279,11 @@ export async function p2pRoutes(app: FastifyInstance) {
           expiresAt: new Date(Date.now() + ad.payWindowMin * 60_000),
         },
       });
-      await systemMessage(tx, o.id, `Order created. The buyer must pay ₹${fiat} within ${ad.payWindowMin} minutes and then mark the order as paid. ${amount} ${ad.asset} is held in escrow.`);
+      await systemMessage(tx, o.id, `Order created. The buyer must pay ${fiat} ${ad.fiat} within ${ad.payWindowMin} minutes and then mark the order as paid. ${amount} ${ad.asset} is held in escrow.`);
       return o;
     });
     await audit(req, u.id, 'p2p.order_created', { id: order.id });
-    ping(order, 'New P2P order', `Order ${order.id.slice(-8)}: ${order.amount} ${order.asset} for ₹${order.fiatAmount}`);
+    ping(order, 'New P2P order', `Order ${order.id.slice(-8)}: ${order.amount} ${order.asset} for ${order.fiatAmount} ${order.fiat}`);
     return ser(order);
   });
 
@@ -337,7 +344,7 @@ export async function p2pRoutes(app: FastifyInstance) {
     const o = await loadOrder((req.params as any).id, u.id);
     if (o.sellerId !== u.id) throw forbidden('Only the seller can release');
     if (o.status !== 'PAID') throw badRequest('You can release only after the buyer marks the order as paid');
-    if (u.totpEnabled && (!code || !authenticator.check(code, u.totpSecret!))) throw badRequest('Invalid 2FA code');
+    if (!(await requireTotpIfEnabled(u, code))) throw badRequest('Invalid 2FA code');
     await prisma.$transaction((tx) => releaseOrder(tx, o, 'seller'));
     await audit(req, u.id, 'p2p.order_released', { id: o.id });
     ping(o, 'P2P order completed', `${o.amount} ${o.asset} released for order ${o.id.slice(-8)}.`);

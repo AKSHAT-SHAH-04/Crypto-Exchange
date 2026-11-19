@@ -24,6 +24,9 @@ import { notify } from '../lib/notify.js';
 import { pushTrade, onPrice, getPrice } from '../market/feed.js';
 import { OrderBook, nextSeq, type Fill, type Side } from './orderbook.js';
 import { FEE_TOKEN, FEE_TOKEN_DISCOUNT, getFeeProfile } from './fees.js';
+import { getTreasuryId } from '../lib/treasury.js';
+import { config } from '../config.js';
+import { isPriceFresh } from '../market/feed.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -226,6 +229,11 @@ async function settle(tx: Tx, pair: Pair, taker: Taker, fills: Fill[]): Promise<
       }
     }
 
+    // fees are revenue: move them to the house account so the ledger stays balanced
+    for (const fee of [buyerFee, sellerFee]) {
+      if (fee.amount.gt(0)) await adjustBalance(tx, getTreasuryId(), fee.asset, fee.amount);
+    }
+
     const trade = await tx.trade.create({
       data: {
         symbol: pair.symbol, price: f.price, quantity: f.qty, takerSide: taker.side,
@@ -313,6 +321,11 @@ const dec = (v: string | undefined, name: string) => {
   }
 };
 
+/** In live mode, orders that depend on the reference price are refused while market data is stale. */
+function assertMarketLive(symbol: string, needsPrice: boolean) {
+  if (config.isLive && needsPrice && !isPriceFresh(symbol)) throw badRequest('Market data is temporarily unavailable — try again shortly');
+}
+
 function pairOrThrow(symbol: string) {
   const pair = pairs.get(symbol);
   const book = books.get(symbol);
@@ -340,8 +353,10 @@ function initialTrailStop(side: Side, ref: number, delta: Dec, pp: number) {
 
 export function placeOrder(userId: string, input: PlaceOrderInput) {
   const symbol = input.symbol.toUpperCase();
+  if (!pairs.has(symbol)) return Promise.reject(badRequest('Market is not available'));
   return serial(symbol, async () => {
     const { pair, book } = pairOrThrow(symbol);
+    assertMarketLive(symbol, input.type !== 'LIMIT');
     const qty = roundQty(pair, input.quantity);
     const conditional = input.type === 'STOP_LIMIT' || input.type === 'TRAILING_STOP';
 
@@ -417,8 +432,10 @@ export interface PlaceOcoInput {
 /** One-cancels-the-other: a limit order plus a stop-limit order sharing a single fund lock. */
 export function placeOco(userId: string, input: PlaceOcoInput) {
   const symbol = input.symbol.toUpperCase();
+  if (!pairs.has(symbol)) return Promise.reject(badRequest('Market is not available'));
   return serial(symbol, async () => {
     const { pair, book } = pairOrThrow(symbol);
+    assertMarketLive(symbol, true);
     const qty = roundQty(pair, input.quantity);
     const price = roundPrice(pair, input.price, 'price');
     const stopPrice = roundPrice(pair, input.stopPrice, 'stop price');

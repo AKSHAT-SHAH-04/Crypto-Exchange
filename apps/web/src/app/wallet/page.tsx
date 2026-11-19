@@ -13,7 +13,9 @@ import { useAuth } from '@/lib/auth';
 import { fmt, fmtDateTime, fmtQty } from '@/lib/format';
 import type { Asset, BalanceRow, Tx } from '@/lib/types';
 import { useT } from '@/lib/i18n';
+import { FiatDepositModal, FiatWithdrawModal, RampModal, RampOrders } from '@/components/wallet/FiatPanels';
 
+const FIAT = ['AED', 'INR', 'USD'];
 const COLORS = ['#7c5cff', '#16c784', '#f59e0b', '#3b82f6', '#ec4899', '#14b8a6', '#a3a3a3'];
 
 function DepositModal({ open, onClose, assets, initial }: { open: boolean; onClose: () => void; assets: Asset[]; initial?: string }) {
@@ -205,7 +207,7 @@ function Wallet() {
   const bal = useApi<{ totalUsd: number; balances: BalanceRow[] }>('/api/wallet/balances', { refreshOnUserEvent: true });
   const txs = useApi<Tx[]>('/api/wallet/transactions', { refreshOnUserEvent: true });
   const assets = useApi<Asset[]>('/api/wallet/assets');
-  const [modal, setModal] = useState<{ kind: 'deposit' | 'withdraw'; asset?: string } | null>(null);
+  const [modal, setModal] = useState<{ kind: 'deposit' | 'withdraw' | 'fiatDeposit' | 'fiatWithdraw' | 'buy' | 'sell'; asset?: string } | null>(null);
   const [hideSmall, setHideSmall] = useState(false);
   const [hidden, setHidden] = useState(false);
 
@@ -255,8 +257,12 @@ function Wallet() {
           </div>
           <div className="num mt-2 text-3xl font-bold">{hidden ? '******' : `$${fmt(total, 2)}`}</div>
           <div className="mt-6 flex flex-wrap gap-2">
-            <button className="btn-brand" onClick={() => setModal({ kind: 'deposit' })}>{t('wallet.deposit')}</button>
-            {!user?.isSubAccount && <button className="btn-ghost" onClick={() => setModal({ kind: 'withdraw' })}>{t('wallet.withdraw')}</button>}
+            <button className="btn-brand" onClick={() => setModal({ kind: 'deposit' })}>{t('wallet.deposit')} crypto</button>
+            <button className="btn-ghost" onClick={() => setModal({ kind: 'fiatDeposit' })}>Deposit cash</button>
+            <button className="btn-ghost" onClick={() => setModal({ kind: 'buy' })}>Buy with card</button>
+            {!user?.isSubAccount && <button className="btn-ghost" onClick={() => setModal({ kind: 'withdraw' })}>{t('wallet.withdraw')} crypto</button>}
+            {!user?.isSubAccount && <button className="btn-ghost" onClick={() => setModal({ kind: 'fiatWithdraw' })}>Withdraw cash</button>}
+            {!user?.isSubAccount && <button className="btn-ghost" onClick={() => setModal({ kind: 'sell' })}>Sell to card</button>}
             <Link href="/convert" className="btn-ghost">{t('nav.convert')}</Link>
             <Link href="/trade/BTCUSDT" className="btn-ghost">{t('nav.trade')}</Link>
           </div>
@@ -310,9 +316,9 @@ function Wallet() {
                   <td className="num px-4 text-right text-muted">{hidden ? '***' : fmtQty(b.locked, 8)}</td>
                   <td className="num px-4 text-right">{hidden ? '***' : `$${fmt(b.usdValue, 2)}`}</td>
                   <td className="whitespace-nowrap px-4 text-right text-xs">
-                    <button className="mr-3 text-brand hover:underline" onClick={() => setModal({ kind: 'deposit', asset: b.asset })}>Deposit</button>
-                    <button className="mr-3 text-brand hover:underline" onClick={() => setModal({ kind: 'withdraw', asset: b.asset })}>Withdraw</button>
-                    {b.asset !== 'USDT' && <Link className="text-brand hover:underline" href={`/trade/${b.asset}USDT`}>Trade</Link>}
+                    <button className="mr-3 text-brand hover:underline" onClick={() => setModal({ kind: FIAT.includes(b.asset) ? 'fiatDeposit' : 'deposit', asset: b.asset })}>Deposit</button>
+                    <button className="mr-3 text-brand hover:underline" onClick={() => setModal({ kind: FIAT.includes(b.asset) ? 'fiatWithdraw' : 'withdraw', asset: b.asset })}>Withdraw</button>
+                    {FIAT.includes(b.asset) ? <Link className="text-brand hover:underline" href="/convert">Convert</Link> : b.asset !== 'USDT' && <Link className="text-brand hover:underline" href={`/trade/${b.asset}USDT`}>Trade</Link>}
                   </td>
                 </tr>
               ))}
@@ -356,7 +362,11 @@ function Wallet() {
         </div>
       </div>
 
-      <DepositModal open={modal?.kind === 'deposit'} onClose={() => setModal(null)} assets={assets.data ?? []} initial={modal?.asset} />
+      <RampOrders />
+      <FiatDepositModal open={modal?.kind === 'fiatDeposit'} onClose={() => setModal(null)} />
+      <FiatWithdrawModal open={modal?.kind === 'fiatWithdraw'} onClose={() => setModal(null)} balances={bal.data?.balances ?? []} />
+      <RampModal open={modal?.kind === 'buy' || modal?.kind === 'sell'} side={modal?.kind === 'sell' ? 'SELL' : 'BUY'} onClose={() => setModal(null)} />
+      <DepositModal open={modal?.kind === 'deposit'} onClose={() => setModal(null)} assets={(assets.data ?? []).filter((a) => !FIAT.includes(a.symbol))} initial={modal?.asset} />
       <WithdrawModal open={modal?.kind === 'withdraw'} onClose={() => setModal(null)} assets={assets.data ?? []} balances={bal.data?.balances ?? []} initial={modal?.asset} />
     </div>
   );

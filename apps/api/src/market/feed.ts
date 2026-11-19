@@ -114,6 +114,7 @@ function connect() {
         const t = tickers.get(d.s);
         if (t) {
           t.price = +d.p;
+          t.updatedAt = now;
           emitPrice(d.s, t.price);
         }
         pushTrade(d.s, { id: `x${d.a}`, price: +d.p, qty: +d.q, side: d.m ? 'SELL' : 'BUY', time: d.T });
@@ -138,8 +139,15 @@ function scheduleReconnect() {
   backoff = Math.min(backoff * 2, 60_000);
 }
 
-/** Random-walk any symbol that hasn't had a real update recently. */
+/** True if the symbol had a real (non-simulated) update recently. */
+export function isPriceFresh(symbol: string) {
+  const t = tickers.get(symbol);
+  return !!t && Date.now() - t.updatedAt < config.priceStaleSeconds * 1000;
+}
+
+/** Random-walk any symbol that hasn't had a real update recently (paper mode only). */
 function simulateStale() {
+  if (config.isLive) return;
   const now = Date.now();
   for (const s of symbols) {
     const t = tickers.get(s);

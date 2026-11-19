@@ -10,9 +10,9 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-0 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={onClose}>
       <div
-        className={`card max-h-[92vh] w-full overflow-y-auto rounded-b-none p-5 sm:rounded-lg ${wide ? 'sm:max-w-2xl' : 'sm:max-w-md'}`}
+        className={`max-h-[92vh] w-full overflow-y-auto rounded-t-3xl border border-line/60 bg-panel p-6 shadow-2xl sm:rounded-3xl ${wide ? 'sm:max-w-2xl' : 'sm:max-w-md'}`}
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-label={title}

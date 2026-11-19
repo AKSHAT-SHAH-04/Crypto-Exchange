@@ -12,7 +12,11 @@ import { useToast } from '@/components/Toast';
 import { fmt, fmtDateTime, fmtQty } from '@/lib/format';
 
 type Tab = 'market' | 'orders' | 'ads' | 'methods';
-const PAYMENT_TYPES = ['UPI', 'IMPS', 'BANK', 'PAYTM'] as const;
+const PAYMENT_TYPES = ['UPI', 'IMPS', 'BANK', 'PAYTM', 'AANI', 'UAE_BANK'] as const;
+const FIATS = ['AED', 'INR'] as const;
+const PAY_FOR: Record<string, string[]> = { AED: ['AANI', 'UAE_BANK'], INR: ['UPI', 'IMPS', 'BANK', 'PAYTM'] };
+const SYM: Record<string, string> = { INR: '₹', AED: 'AED ' };
+const cur = (fiat: string | undefined, v: string | number, dp = 2) => `${SYM[fiat ?? 'INR'] ?? ''}${fmt(v, dp)}`;
 const P2P_ASSETS = ['USDT', 'BTC', 'ETH'];
 
 interface Ad {
@@ -27,9 +31,10 @@ function Market() {
   const toast = useToast();
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
   const [asset, setAsset] = useState('USDT');
+  const [fiatCur, setFiatCur] = useState<(typeof FIATS)[number]>('AED');
   const [payment, setPayment] = useState('');
   const [amount, setAmount] = useState('');
-  const q = new URLSearchParams({ side, asset, ...(payment ? { payment } : {}), ...(+amount ? { amount } : {}) });
+  const q = new URLSearchParams({ side, asset, fiat: fiatCur, ...(payment ? { payment } : {}), ...(+amount ? { amount } : {}) });
   const ads = useApi<Ad[]>(`/api/p2p/ads?${q}`);
   const [pick, setPick] = useState<Ad | null>(null);
   const [fiat, setFiat] = useState('');
@@ -60,10 +65,11 @@ function Market() {
             <button key={a} onClick={() => setAsset(a)} className={clsx('rounded px-3 py-1.5 text-sm font-medium', asset === a ? 'text-brand' : 'text-muted hover:text-fg')}>{a}</button>
           ))}
         </div>
-        <input className="input w-40" placeholder="Amount (INR)" inputMode="decimal" value={amount} onChange={(e) => /^\d*\.?\d*$/.test(e.target.value) && setAmount(e.target.value)} />
+        <select className="input w-24" value={fiatCur} onChange={(e) => { setFiatCur(e.target.value as any); setPayment(''); }}>{FIATS.map((f) => <option key={f}>{f}</option>)}</select>
+        <input className="input w-40" placeholder={`Amount (${fiatCur})`} inputMode="decimal" value={amount} onChange={(e) => /^\d*\.?\d*$/.test(e.target.value) && setAmount(e.target.value)} />
         <select className="input w-40" value={payment} onChange={(e) => setPayment(e.target.value)}>
           <option value="">All payments</option>
-          {PAYMENT_TYPES.map((p) => <option key={p}>{p}</option>)}
+          {PAY_FOR[fiatCur].map((p) => <option key={p}>{p}</option>)}
         </select>
         <button className="btn-ghost ml-auto" onClick={ads.reload}>Refresh</button>
       </div>
@@ -86,10 +92,10 @@ function Market() {
                     </div>
                   </div>
                 </td>
-                <td className="num px-4 text-lg font-semibold">₹{fmt(a.price, 2)}</td>
+                <td className="num px-4 text-lg font-semibold">{cur(a.fiat, a.price, 2)}</td>
                 <td className="px-4 text-xs">
                   <div className="num">{fmtQty(a.remaining, 6)} {a.asset}</div>
-                  <div className="num text-muted">₹{fmt(a.minFiat, 0)} – ₹{fmt(a.effectiveMaxFiat, 0)}</div>
+                  <div className="num text-muted">{cur(a.fiat, a.minFiat, 0)} – {cur(a.fiat, a.effectiveMaxFiat, 0)}</div>
                 </td>
                 <td className="px-4">
                   <div className="flex flex-wrap gap-1">{a.paymentTypes.map((p) => <span key={p} className="rounded border border-line px-1.5 py-0.5 text-[11px]">{p}</span>)}</div>
@@ -112,9 +118,9 @@ function Market() {
       <Modal open={!!pick} onClose={() => setPick(null)} title={pick ? `${side === 'BUY' ? 'Buy' : 'Sell'} ${pick.asset} from ${pick.advertiser.name}` : ''}>
         {pick && (
           <div className="space-y-3 text-sm">
-            <div className="flex justify-between"><span className="text-muted">Price</span><span className="num font-semibold">₹{fmt(pick.price, 2)}</span></div>
+            <div className="flex justify-between"><span className="text-muted">Price</span><span className="num font-semibold">{cur(pick.fiat, pick.price, 2)}</span></div>
             <div className="flex justify-between"><span className="text-muted">Payment window</span><span>{pick.payWindowMin} min</span></div>
-            <Field label={`I want to ${side === 'BUY' ? 'pay' : 'receive'} (INR)`} hint={`Limits ₹${fmt(pick.minFiat, 0)} – ₹${fmt(pick.effectiveMaxFiat, 0)}`}>
+            <Field label={`I want to ${side === 'BUY' ? 'pay' : 'receive'} (${pick.fiat})`} hint={`Limits ${cur(pick.fiat, pick.minFiat, 0)} – ${cur(pick.fiat, pick.effectiveMaxFiat, 0)}`}>
               <input className="input num" inputMode="decimal" autoFocus value={fiat} onChange={(e) => /^\d*\.?\d*$/.test(e.target.value) && setFiat(e.target.value)} />
             </Field>
             <div className="flex justify-between"><span className="text-muted">I will {side === 'BUY' ? 'receive' : 'sell'}</span><span className="num">{+fiat ? fmtQty(+fiat / +pick.price, 8) : '0'} {pick.asset}</span></div>
@@ -142,8 +148,8 @@ function MyOrders() {
               <td className="num px-4 py-2 text-xs text-muted">{fmtDateTime(o.createdAt)}</td>
               <td className={clsx('px-4 font-medium', o.role === 'BUYER' ? 'text-up' : 'text-down')}>{o.role === 'BUYER' ? 'Buy' : 'Sell'} {o.asset}</td>
               <td className="num px-4">{fmtQty(o.amount, 8)}</td>
-              <td className="num px-4">₹{fmt(o.price, 2)}</td>
-              <td className="num px-4">₹{fmt(o.fiatAmount, 2)}</td>
+              <td className="num px-4">{cur(o.fiat, o.price, 2)}</td>
+              <td className="num px-4">{cur(o.fiat, o.fiatAmount, 2)}</td>
               <td className="px-4"><StatusBadge status={o.status} /></td>
               <td className="px-4 text-right"><Link className="text-brand hover:underline" href={`/p2p/order/${o.id}`}>View</Link></td>
             </tr>
@@ -159,7 +165,7 @@ function MyAds() {
   const toast = useToast();
   const ads = useApi<any[]>('/api/p2p/my-ads', { refreshOnUserEvent: true });
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ side: 'SELL', asset: 'USDT', price: '', totalAmount: '', minFiat: '500', maxFiat: '50000', paymentTypes: ['UPI'] as string[], terms: '', payWindowMin: '15' });
+  const [f, setF] = useState({ side: 'SELL', asset: 'USDT', fiat: 'AED', price: '', totalAmount: '', minFiat: '100', maxFiat: '50000', paymentTypes: ['AANI'] as string[], terms: '', payWindowMin: '15' });
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     try {
       await fn();
@@ -179,9 +185,9 @@ function MyAds() {
             {ads.data?.map((a) => (
               <tr key={a.id} className="border-b border-line/50 last:border-0">
                 <td className={clsx('px-4 py-2 font-medium', a.side === 'BUY' ? 'text-up' : 'text-down')}>{a.side === 'BUY' ? 'Buy' : 'Sell'} {a.asset}</td>
-                <td className="num px-4">₹{fmt(a.price, 2)}</td>
+                <td className="num px-4">{cur(a.fiat, a.price, 2)}</td>
                 <td className="num px-4 text-xs">{fmtQty(a.remaining, 6)} / {fmtQty(a.totalAmount, 6)}</td>
-                <td className="num px-4 text-xs">₹{fmt(a.minFiat, 0)} – ₹{fmt(a.maxFiat, 0)}</td>
+                <td className="num px-4 text-xs">{cur(a.fiat, a.minFiat, 0)} – {cur(a.fiat, a.maxFiat, 0)}</td>
                 <td className="px-4 text-xs">{a.paymentTypes.join(', ')}</td>
                 <td className="px-4"><StatusBadge status={a.status === 'ONLINE' ? 'APPROVED' : 'PENDING'} /> <span className="text-xs text-muted">{a.status.toLowerCase()}</span></td>
                 <td className="whitespace-nowrap px-4 text-right text-xs">
@@ -207,15 +213,18 @@ function MyAds() {
           <Field label="Asset">
             <select className="input" value={f.asset} onChange={(e) => setF({ ...f, asset: e.target.value })}>{P2P_ASSETS.map((a) => <option key={a}>{a}</option>)}</select>
           </Field>
-          <Field label="Price per unit (INR)"><input className="input num" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} /></Field>
+          <Field label="Fiat currency">
+            <select className="input" value={f.fiat} onChange={(e) => setF({ ...f, fiat: e.target.value, paymentTypes: [PAY_FOR[e.target.value][0]] })}>{FIATS.map((x) => <option key={x}>{x}</option>)}</select>
+          </Field>
+          <Field label={`Price per unit (${f.fiat})`}><input className="input num" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} /></Field>
           <Field label={`Total amount (${f.asset})`} hint={f.side === 'SELL' ? 'This amount is escrowed from your wallet now.' : undefined}>
             <input className="input num" value={f.totalAmount} onChange={(e) => setF({ ...f, totalAmount: e.target.value })} />
           </Field>
-          <Field label="Min order (INR)"><input className="input num" value={f.minFiat} onChange={(e) => setF({ ...f, minFiat: e.target.value })} /></Field>
-          <Field label="Max order (INR)"><input className="input num" value={f.maxFiat} onChange={(e) => setF({ ...f, maxFiat: e.target.value })} /></Field>
+          <Field label={`Min order (${f.fiat})`}><input className="input num" value={f.minFiat} onChange={(e) => setF({ ...f, minFiat: e.target.value })} /></Field>
+          <Field label={`Max order (${f.fiat})`}><input className="input num" value={f.maxFiat} onChange={(e) => setF({ ...f, maxFiat: e.target.value })} /></Field>
           <Field label="Payment methods">
             <div className="flex flex-wrap gap-2 pt-1">
-              {PAYMENT_TYPES.map((p) => (
+              {PAY_FOR[f.fiat].map((p) => (
                 <label key={p} className="flex items-center gap-1 text-sm">
                   <input type="checkbox" checked={f.paymentTypes.includes(p)} onChange={(e) => setF({ ...f, paymentTypes: e.target.checked ? [...f.paymentTypes, p] : f.paymentTypes.filter((x) => x !== p) })} /> {p}
                 </label>
@@ -246,6 +255,8 @@ function PaymentMethods() {
     PAYTM: [['phone', 'Paytm phone number'], ['name', 'Account holder name']],
     BANK: [['name', 'Account holder name'], ['accountNumber', 'Account number'], ['ifsc', 'IFSC'], ['bank', 'Bank name']],
     IMPS: [['name', 'Account holder name'], ['accountNumber', 'Account number'], ['ifsc', 'IFSC'], ['bank', 'Bank name']],
+    AANI: [['phoneOrAlias', 'Aani mobile number or alias'], ['name', 'Account holder name']],
+    UAE_BANK: [['name', 'Account holder name'], ['iban', 'IBAN (AE…)'], ['bank', 'Bank name']],
   };
   const add = async () => {
     try {
@@ -278,7 +289,7 @@ function PaymentMethods() {
         <select className="input" value={type} onChange={(e) => { setType(e.target.value as any); setD({}); }}>{PAYMENT_TYPES.map((p) => <option key={p}>{p}</option>)}</select>
         <input className="input" placeholder="Label (e.g. GPay)" value={label} onChange={(e) => setLabel(e.target.value)} />
         {fields[type].map(([k, ph]) => (
-          <input key={k} className="input" placeholder={ph} value={d[k] ?? ''} onChange={(e) => setD({ ...d, [k]: k === 'ifsc' ? e.target.value.toUpperCase() : e.target.value })} />
+          <input key={k} className="input" placeholder={ph} value={d[k] ?? ''} onChange={(e) => setD({ ...d, [k]: k === 'ifsc' || k === 'iban' ? e.target.value.toUpperCase() : e.target.value })} />
         ))}
         <p className="text-xs text-muted">The name must match your verified identity.</p>
         <button className="btn-brand w-full" onClick={add}>Save</button>
@@ -301,7 +312,7 @@ export default function P2PPage() {
       <div className="mb-6 flex flex-wrap items-end gap-4">
         <div>
           <h1 className="text-2xl font-bold">P2P trading</h1>
-          <p className="mt-1 text-sm text-muted">Buy and sell crypto directly with other users using UPI, IMPS or bank transfer. Crypto is held in escrow until payment is confirmed.</p>
+          <p className="mt-1 text-sm text-muted">Buy and sell crypto directly with other users in AED (Aani, bank transfer) or INR (UPI, IMPS, bank). Crypto is held in escrow until payment is confirmed.</p>
         </div>
         {user && user.kycStatus !== 'APPROVED' && (
           <Link href="/account?tab=kyc" className="ml-auto rounded-md bg-brand/10 px-3 py-2 text-sm text-brand">Complete KYC to trade P2P →</Link>

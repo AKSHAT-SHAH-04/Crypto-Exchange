@@ -21,6 +21,15 @@ export function Chart({ symbol, price, pricePrecision }: { symbol: string; price
   const last = useRef<Candle | null>(null);
   const [interval, setInterval_] = useState<(typeof INTERVALS)[number]['id']>('1h');
   const [loading, setLoading] = useState(true);
+  // rebuild the chart when light/dark theme changes (colors are read from CSS variables)
+  const [theme, setTheme] = useState('');
+  useEffect(() => {
+    const read = () => setTheme(document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+    read();
+    const mo = new MutationObserver(read);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => mo.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!el.current) return;
@@ -42,7 +51,7 @@ export function Chart({ symbol, price, pricePrecision }: { symbol: string; price
     volume.current.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     chart.current = c;
     return () => c.remove();
-  }, [pricePrecision]);
+  }, [pricePrecision, theme]);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,7 +71,7 @@ export function Chart({ symbol, price, pricePrecision }: { symbol: string; price
     return () => {
       cancelled = true;
     };
-  }, [symbol, interval, pricePrecision]);
+  }, [symbol, interval, pricePrecision, theme]);
 
   // Stream the live price into the current candle.
   useEffect(() => {

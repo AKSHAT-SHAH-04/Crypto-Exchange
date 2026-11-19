@@ -2,48 +2,76 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Light is the default; `.dark` on <html> switches to dark. */
 :root {
-  --bg: 11 13 18;
-  --panel: 20 23 31;
-  --panel2: 28 32 42;
-  --line: 40 45 58;
-  --fg: 234 236 241;
-  --muted: 132 140 158;
-  --brand: 124 92 255;
-  --up: 22 199 132;
-  --down: 234 57 67;
-  color-scheme: dark;
-}
-:root.light {
-  --bg: 245 246 250;
+  --bg: 255 255 255;
+  --section: 245 245 247;
   --panel: 255 255 255;
-  --panel2: 240 241 246;
-  --line: 222 225 233;
-  --fg: 22 25 34;
-  --muted: 104 112 130;
-  --brand: 104 70 245;
-  --up: 3 166 109;
-  --down: 214 40 54;
+  --panel2: 245 245 247;
+  --line: 222 222 227;
+  --fg: 29 29 31;
+  --muted: 110 110 115;
+  --brand: 0 113 227;
+  --up: 3 152 85;
+  --down: 227 52 47;
   color-scheme: light;
+}
+:root.dark {
+  --bg: 0 0 0;
+  --section: 18 18 19;
+  --panel: 28 28 30;
+  --panel2: 44 44 46;
+  --line: 56 56 58;
+  --fg: 245 245 247;
+  --muted: 152 152 157;
+  --brand: 41 151 255;
+  --up: 48 209 88;
+  --down: 255 69 58;
+  color-scheme: dark;
 }
 
 html, body { background: rgb(var(--bg)); color: rgb(var(--fg)); }
-body { -webkit-font-smoothing: antialiased; }
-.num { font-variant-numeric: tabular-nums; font-family: var(--font-mono), ui-monospace, monospace; }
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.011em;
+  font-feature-settings: 'kern';
+}
+/* Tabular figures in the UI typeface keep numbers aligned without looking "code-like". */
+.num { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 
 @layer components {
-  .card { @apply rounded-lg border border-line bg-panel; }
-  .btn { @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50; }
+  .card { @apply rounded-2xl border border-line/70 bg-panel shadow-[0_1px_3px_rgba(0,0,0,0.04)]; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2 text-sm font-medium transition duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100; }
   .btn-brand { @apply btn bg-brand text-white hover:brightness-110; }
-  .btn-ghost { @apply btn border border-line bg-panel2 hover:bg-line; }
+  .btn-ghost { @apply btn bg-panel2 text-fg hover:bg-line/70; }
   .btn-up { @apply btn bg-up text-white hover:brightness-110; }
   .btn-down { @apply btn bg-down text-white hover:brightness-110; }
-  .input { @apply w-full rounded-md border border-line bg-panel2 px-3 py-2 text-sm outline-none transition placeholder:text-muted focus:border-brand; }
-  .label { @apply mb-1 block text-xs font-medium text-muted; }
-  .tab { @apply cursor-pointer whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm font-medium text-muted hover:text-fg; }
-  .tab-active { @apply border-brand text-fg; }
+  .link-arrow { @apply inline-flex items-center gap-1 text-brand hover:underline; }
+  .input { @apply w-full rounded-xl border border-line bg-panel px-3.5 py-2.5 text-sm outline-none transition placeholder:text-muted focus:border-brand focus:ring-4 focus:ring-brand/15; }
+  .label { @apply mb-1.5 block text-xs font-medium text-muted; }
+  .tab { @apply cursor-pointer whitespace-nowrap border-b-2 border-transparent px-3 py-2.5 text-sm font-medium text-muted transition hover:text-fg; }
+  .tab-active { @apply border-fg text-fg; }
   .table-head { @apply text-left text-xs font-medium text-muted; }
+  .eyebrow { @apply text-sm font-semibold uppercase tracking-wide text-brand; }
+  .headline { @apply font-semibold tracking-[-0.03em]; }
 }
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-thumb { background: rgb(var(--line)); border-radius: 3px; }
+/* scroll-reveal (see useReveal) */
+.reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.9s cubic-bezier(0.22, 1, 0.36, 1), transform 0.9s cubic-bezier(0.22, 1, 0.36, 1); }
+.reveal.reveal-in { opacity: 1; transform: none; }
+
+@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.marquee { animation: marquee 60s linear infinite; }
+.marquee:hover { animation-play-state: paused; }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+.float { animation: float 6s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .marquee, .float { animation: none; }
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgb(var(--line)); border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }

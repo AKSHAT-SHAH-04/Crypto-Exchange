@@ -7,6 +7,7 @@ export default {
     extend: {
       colors: {
         bg: 'rgb(var(--bg) / <alpha-value>)',
+        section: 'rgb(var(--section) / <alpha-value>)',
         panel: 'rgb(var(--panel) / <alpha-value>)',
         panel2: 'rgb(var(--panel2) / <alpha-value>)',
         line: 'rgb(var(--line) / <alpha-value>)',
@@ -17,7 +18,8 @@ export default {
         down: 'rgb(var(--down) / <alpha-value>)',
       },
       fontFamily: {
-        sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+        // Native system UI font first (SF Pro on Apple devices), Inter elsewhere.
+        sans: ['-apple-system', 'BlinkMacSystemFont', 'var(--font-sans)', 'system-ui', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
         mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
       },
     },
