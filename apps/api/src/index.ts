@@ -21,6 +21,16 @@ import { orderRoutes } from './routes/orders.js';
 import { walletRoutes } from './routes/wallet.js';
 import { accountRoutes } from './routes/account.js';
 import { adminRoutes } from './routes/admin.js';
+import { convertRoutes } from './routes/convert.js';
+import { alertRoutes } from './routes/alerts.js';
+import { feeRoutes } from './routes/fees.js';
+import { notificationRoutes } from './routes/notifications.js';
+import { announcementRoutes } from './routes/announcements.js';
+import { supportRoutes } from './routes/support.js';
+import { subAccountRoutes } from './routes/subaccounts.js';
+import { exportRoutes } from './routes/export.js';
+import { p2pRoutes } from './routes/p2p.js';
+import { initAlerts } from './engine/alerts.js';
 
 const app = Fastify({
   logger: { level: config.isProd ? 'info' : 'warn' },
@@ -68,8 +78,18 @@ await app.register(orderRoutes);
 await app.register(walletRoutes);
 await app.register(accountRoutes);
 await app.register(adminRoutes);
+await app.register(convertRoutes);
+await app.register(alertRoutes);
+await app.register(feeRoutes);
+await app.register(notificationRoutes);
+await app.register(announcementRoutes);
+await app.register(supportRoutes);
+await app.register(subAccountRoutes);
+await app.register(exportRoutes);
+await app.register(p2pRoutes);
 
 await initEngine();
+await initAlerts();
 await startFeed(listPairs().filter((p) => p.enabled).map((p) => ({ symbol: p.symbol, seedPrice: p.seedPrice.toNumber() })));
 startFeedLoops();
 startMarketMaker();

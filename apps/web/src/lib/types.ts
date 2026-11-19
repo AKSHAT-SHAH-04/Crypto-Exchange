@@ -11,9 +11,13 @@ export interface MarketTrade { id: string; price: number; qty: number; side: 'BU
 export interface User {
   id: string; email: string; name: string | null; role: 'USER' | 'ADMIN'; emailVerified: boolean;
   totpEnabled: boolean; kycStatus: 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED'; hasPassword: boolean; createdAt: string;
+  isSubAccount: boolean; subLabel: string | null; actingFrom: string | null; payFeesWithToken: boolean;
 }
+export interface Notification { id: string; type: string; title: string; body: string; link: string | null; read: boolean; createdAt: string }
+export interface Announcement { id: string; title: string; body: string; category: string; pinned: boolean; createdAt: string }
 export interface Order {
-  id: string; symbol: string; side: 'BUY' | 'SELL'; type: 'LIMIT' | 'MARKET' | 'STOP_LIMIT';
+  id: string; symbol: string; side: 'BUY' | 'SELL'; type: 'LIMIT' | 'MARKET' | 'STOP_LIMIT' | 'TRAILING_STOP';
+  ocoId: string | null; trailingDelta: string | null;
   status: 'PENDING_TRIGGER' | 'OPEN' | 'PARTIALLY_FILLED' | 'FILLED' | 'CANCELED' | 'REJECTED';
   price: string | null; stopPrice: string | null; quantity: string; filledQty: string; quoteFilled: string;
   avgPrice: string | null; createdAt: string; updatedAt: string;
@@ -25,7 +29,7 @@ export interface MyTrade {
 export interface BalanceRow { asset: string; name: string; available: string; locked: string; usdPrice: number; usdValue: number }
 export interface Asset { symbol: string; name: string; precision: number; networks: string[]; minWithdraw: string; withdrawFee: string; usdPrice: number }
 export interface Tx {
-  id: string; type: 'DEPOSIT' | 'WITHDRAWAL' | 'BONUS' | 'ADJUSTMENT';
+  id: string; type: 'DEPOSIT' | 'WITHDRAWAL' | 'BONUS' | 'ADJUSTMENT' | 'TRANSFER' | 'P2P' | 'CONVERT';
   status: 'AWAITING_EMAIL' | 'PENDING_APPROVAL' | 'COMPLETED' | 'REJECTED' | 'CANCELED';
   asset: string; network: string | null; amount: string; fee: string; address: string | null; txHash: string | null; note: string | null; createdAt: string;
 }

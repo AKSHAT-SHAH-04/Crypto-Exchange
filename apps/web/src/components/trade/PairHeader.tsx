@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { Market, Ticker } from '@/lib/types';
 import { fmtCompact, fmtPct, fmtPrice } from '@/lib/format';
 import { useFavorites } from '@/components/MarketTable';
+import { AlertButton } from './AlertButton';
 
 export function PairHeader({ market, ticker, markets, tickers }: { market: Market; ticker?: Ticker; markets: Market[]; tickers: Record<string, Ticker> }) {
   const up = (ticker?.changePct ?? 0) >= 0;
@@ -32,6 +33,7 @@ export function PairHeader({ market, ticker, markets, tickers }: { market: Marke
       {stat('24h low', fmtPrice(ticker?.low, market.pricePrecision))}
       {stat(`24h volume (${market.base})`, fmtCompact(ticker?.volume ?? 0))}
       {stat(`24h volume (${market.quote})`, fmtCompact(ticker?.quoteVolume ?? 0))}
+      <div className="ml-auto"><AlertButton market={market} price={ticker?.price} /></div>
       {open && (
         <div className="fixed inset-x-4 top-32 z-30 max-h-[60vh] overflow-y-auto rounded-lg border border-line bg-panel shadow-xl sm:absolute sm:inset-x-auto sm:left-10 sm:top-12 sm:w-80" onMouseLeave={() => setOpen(false)}>
           {markets.map((m) => {

@@ -6,11 +6,13 @@ import { AuthCard, FormError } from '@/components/AuthCard';
 import { Field } from '@/components/Field';
 import { api, errMsg } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useT } from '@/lib/i18n';
 
 function Login() {
   const params = useSearchParams();
   const router = useRouter();
   const { refresh, googleEnabled, user } = useAuth();
+  const { t } = useT();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [ticket, setTicket] = useState<string | null>(params.get('ticket'));
@@ -60,26 +62,26 @@ function Login() {
     );
 
   return (
-    <AuthCard title="Log in" subtitle="Welcome back.">
+    <AuthCard title={t('auth.login')} subtitle={t('auth.welcome')}>
       <form onSubmit={submit} className="space-y-4">
         <FormError error={error} />
-        <Field label="Email">
+        <Field label={t('auth.email')}>
           <input className="input" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
         </Field>
-        <Field label="Password">
+        <Field label={t('auth.password')}>
           <input className="input" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         <div className="text-right text-sm">
-          <Link href="/forgot-password" className="text-brand hover:underline">Forgot password?</Link>
+          <Link href="/forgot-password" className="text-brand hover:underline">{t('auth.forgot')}</Link>
         </div>
-        <button className="btn-brand w-full" disabled={busy}>{busy ? 'Logging in…' : 'Log in'}</button>
+        <button className="btn-brand w-full" disabled={busy}>{busy ? '…' : t('auth.login')}</button>
         {googleEnabled && (
           <a href="/api/auth/google" className="btn-ghost w-full">
-            <span className="font-bold">G</span> Continue with Google
+            <span className="font-bold">G</span> {t('auth.google')}
           </a>
         )}
         <p className="text-center text-sm text-muted">
-          New here? <Link href="/register" className="text-brand hover:underline">Create an account</Link>
+          {t('auth.new')} <Link href="/register" className="text-brand hover:underline">{t('auth.createAccount')}</Link>
         </p>
       </form>
     </AuthCard>

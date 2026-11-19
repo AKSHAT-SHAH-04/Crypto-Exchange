@@ -74,9 +74,47 @@ async function main() {
     }
   }
 
+  // ---- P2P demo merchant with live ads so the marketplace isn't empty ----
+  const merchant = await prisma.user.upsert({
+    where: { email: 'merchant@example.com' },
+    create: { email: 'merchant@example.com', name: 'QuickPay Merchant', passwordHash: demoPw, emailVerified: true, kycStatus: 'APPROVED' },
+    update: {},
+  });
+  if (!(await prisma.p2PAd.count({ where: { userId: merchant.id } }))) {
+    await prisma.balance.upsert({
+      where: { userId_asset: { userId: merchant.id, asset: 'USDT' } },
+      create: { userId: merchant.id, asset: 'USDT', available: new D(45000), locked: new D(5000) },
+      update: { available: new D(45000), locked: new D(5000) },
+    });
+    await prisma.p2PPaymentMethod.createMany({
+      data: [
+        { userId: merchant.id, type: 'UPI', label: 'Primary UPI', details: { upiId: 'quickpay@okbank', name: 'QuickPay Merchant' } },
+        { userId: merchant.id, type: 'IMPS', label: 'HDFC current', details: { accountNumber: '50100012345678', ifsc: 'HDFC0001234', name: 'QuickPay Merchant', bank: 'HDFC Bank' } },
+      ],
+    });
+    await prisma.p2PAd.createMany({
+      data: [
+        { userId: merchant.id, side: 'SELL', asset: 'USDT', price: new D(88.5), totalAmount: new D(5000), remaining: new D(5000), minFiat: new D(500), maxFiat: new D(200000), paymentTypes: ['UPI', 'IMPS'], terms: 'Pay only from an account in your own name. No third-party payments.' },
+        { userId: merchant.id, side: 'BUY', asset: 'USDT', price: new D(86.9), totalAmount: new D(10000), remaining: new D(10000), minFiat: new D(1000), maxFiat: new D(300000), paymentTypes: ['UPI', 'IMPS', 'BANK'], terms: 'I release INR within 10 minutes of order creation.' },
+      ],
+    });
+  }
+
+  if (!(await prisma.announcement.count())) {
+    await prisma.announcement.createMany({
+      data: [
+        { title: 'Welcome to paper trading', category: 'General', pinned: true, body: 'Every new account gets 10,000 demo USDT. Prices, candles and market trades mirror the live market so you can practise risk-free.\n\nTry the new OCO and trailing-stop orders, Convert and P2P!' },
+        { title: 'New: OCO, trailing stop and price alerts', category: 'Product', body: 'Protect profits with One-Cancels-the-Other orders, let a trailing stop follow the market, and get notified when a price level is reached.' },
+        { title: 'P2P trading is live for INR', category: 'Product', body: 'Buy and sell USDT directly with other users via UPI, IMPS and bank transfer. Crypto is held in escrow until the seller confirms payment.' },
+        { title: 'Scheduled maintenance', category: 'Maintenance', body: 'Deposits and withdrawals may be briefly delayed during routine maintenance this Sunday 02:00-02:30 UTC. Trading is not affected.' },
+      ],
+    });
+  }
+
   console.log('Seeded assets, pairs and users:');
   console.log('  admin@example.com / Admin@12345 (admin)');
   console.log('  demo@example.com  / Demo@12345');
+  console.log('  merchant@example.com / Demo@12345 (P2P merchant)');
 }
 
 main()

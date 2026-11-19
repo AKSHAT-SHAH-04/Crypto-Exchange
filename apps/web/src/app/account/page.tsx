@@ -1,6 +1,7 @@
 'use client';
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { RequireAuth } from '@/components/RequireAuth';
 import { Tabs } from '@/components/Tabs';
 import { Field, StatusBadge } from '@/components/Field';
@@ -8,9 +9,10 @@ import { useToast } from '@/components/Toast';
 import { api, errMsg } from '@/lib/api';
 import { useApi } from '@/lib/hooks';
 import { useAuth } from '@/lib/auth';
-import { fmtDateTime } from '@/lib/format';
+import { fmt, fmtCompact, fmtDateTime, fmtPrice } from '@/lib/format';
 
-type Tab = 'overview' | 'security' | 'kyc' | 'api' | 'activity';
+type Tab = 'overview' | 'security' | 'kyc' | 'api' | 'fees' | 'alerts' | 'activity';
+const TABS: Tab[] = ['overview', 'security', 'kyc', 'api', 'fees', 'alerts', 'activity'];
 
 function useSubmit() {
   const toast = useToast();
@@ -211,6 +213,77 @@ Example (Node):
   );
 }
 
+function Fees() {
+  const { refresh } = useAuth();
+  const fees = useApi<any>('/api/fees');
+  const { busy, run } = useSubmit();
+  if (!fees.data) return <p className="text-muted">Loading…</p>;
+  const { me, tiers, feeToken, feeTokenDiscount, baseMakerFee, baseTakerFee } = fees.data;
+  const pct = (base: string, mult: number) => `${parseFloat((+base * mult * 100).toFixed(4))}%`;
+  const next = tiers.find((t: any) => t.minVolume > (me?.volume30d ?? 0));
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="card p-5"><div className="text-xs text-muted">Your VIP level</div><div className="mt-1 text-3xl font-bold text-brand">VIP {me?.level ?? 0}</div></div>
+        <div className="card p-5">
+          <div className="text-xs text-muted">30-day trading volume</div>
+          <div className="num mt-1 text-2xl font-bold">${fmt(me?.volume30d ?? 0, 2)}</div>
+          {next && <div className="mt-2 h-1.5 overflow-hidden rounded bg-panel2"><div className="h-full bg-brand" style={{ width: `${Math.min(100, ((me?.volume30d ?? 0) / next.minVolume) * 100)}%` }} /></div>}
+          {next && <div className="mt-1 text-xs text-muted">${fmtCompact(next.minVolume - (me?.volume30d ?? 0))} more to VIP {next.level}</div>}
+        </div>
+        <div className="card p-5">
+          <div className="text-xs text-muted">Pay fees with {feeToken}</div>
+          <div className="mt-1 text-sm">Get <b className="text-up">{feeTokenDiscount * 100}% off</b> trading fees when you hold {feeToken}.</div>
+          <label className="mt-3 flex items-center gap-2 text-sm">
+            <input type="checkbox" disabled={busy} checked={!!me?.payWithToken} onChange={(e) => run(() => api('/api/fees/settings', { method: 'PATCH', body: { payFeesWithToken: e.target.checked } }).then(() => { fees.reload(); refresh(); }), 'Fee setting updated')} />
+            Use {feeToken} to pay fees
+          </label>
+        </div>
+      </div>
+      <div className="card overflow-x-auto">
+        <table className="w-full min-w-[560px] text-sm">
+          <thead><tr className="border-b border-line">{['Level', '30d volume (USD)', 'Maker', 'Taker', `Maker w/ ${feeToken}`, `Taker w/ ${feeToken}`].map((h) => <th key={h} className="table-head px-4 py-2">{h}</th>)}</tr></thead>
+          <tbody>
+            {tiers.map((t: any) => (
+              <tr key={t.level} className={`border-b border-line/50 last:border-0 ${t.level === me?.level ? 'bg-brand/10' : ''}`}>
+                <td className="px-4 py-2 font-semibold">VIP {t.level}</td>
+                <td className="num px-4">{t.minVolume ? `≥ $${fmtCompact(t.minVolume)}` : '< $1M'}</td>
+                <td className="num px-4">{pct(baseMakerFee, t.makerMult)}</td>
+                <td className="num px-4">{pct(baseTakerFee, t.takerMult)}</td>
+                <td className="num px-4 text-up">{pct(baseMakerFee, t.makerMult * (1 - feeTokenDiscount))}</td>
+                <td className="num px-4 text-up">{pct(baseTakerFee, t.takerMult * (1 - feeTokenDiscount))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function Alerts() {
+  const alerts = useApi<any[]>('/api/alerts');
+  return (
+    <div className="card overflow-x-auto">
+      <table className="w-full min-w-[560px] text-sm">
+        <thead><tr className="border-b border-line">{['Pair', 'Condition', 'Note', 'Status', ''].map((h) => <th key={h} className="table-head px-4 py-2">{h}</th>)}</tr></thead>
+        <tbody>
+          {alerts.data?.map((a) => (
+            <tr key={a.id} className="border-b border-line/50 last:border-0">
+              <td className="px-4 py-2"><Link href={`/trade/${a.symbol}`} className="font-medium hover:text-brand">{a.symbol.replace('USDT', '/USDT')}</Link></td>
+              <td className={`num px-4 ${a.direction === 'ABOVE' ? 'text-up' : 'text-down'}`}>{a.direction === 'ABOVE' ? '≥' : '≤'} {fmtPrice(a.price)}</td>
+              <td className="px-4 text-xs text-muted">{a.note ?? '—'}</td>
+              <td className="px-4 text-xs">{a.active ? 'Active' : `Triggered ${a.triggeredAt ? fmtDateTime(a.triggeredAt) : ''}`}</td>
+              <td className="px-4 text-right"><button className="text-xs text-down" onClick={() => api(`/api/alerts/${a.id}`, { method: 'DELETE' }).then(alerts.reload)}>Delete</button></td>
+            </tr>
+          ))}
+          {!alerts.data?.length && <tr><td colSpan={5} className="p-8 text-center text-muted">No alerts. Create one from the 🔔 button on any trading page.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Activity() {
   const logs = useApi<{ id: string; action: string; ip: string | null; userAgent: string | null; createdAt: string }[]>('/api/account/activity');
   return (
@@ -232,10 +305,12 @@ function Activity() {
   );
 }
 
-export default function AccountPage() {
-  const [tab, setTab] = useState<Tab>('overview');
+function AccountTabs() {
+  const params = useSearchParams();
+  const initial = params.get('tab') as Tab | null;
+  const [tab, setTab] = useState<Tab>(initial && TABS.includes(initial) ? initial : 'overview');
   return (
-    <RequireAuth>
+    <>
       <div className="mx-auto max-w-[1100px] px-4 py-8">
         <h1 className="mb-4 text-2xl font-bold">Account</h1>
         <Tabs<Tab>
@@ -247,6 +322,8 @@ export default function AccountPage() {
             { id: 'security', label: 'Security' },
             { id: 'kyc', label: 'Identity verification' },
             { id: 'api', label: 'API keys' },
+            { id: 'fees', label: 'Fees & VIP' },
+            { id: 'alerts', label: 'Price alerts' },
             { id: 'activity', label: 'Activity log' },
           ]}
         />
@@ -254,8 +331,20 @@ export default function AccountPage() {
         {tab === 'security' && <Security />}
         {tab === 'kyc' && <Kyc />}
         {tab === 'api' && <ApiKeys />}
+        {tab === 'fees' && <Fees />}
+        {tab === 'alerts' && <Alerts />}
         {tab === 'activity' && <Activity />}
       </div>
+    </>
+  );
+}
+
+export default function AccountPage() {
+  return (
+    <RequireAuth>
+      <Suspense>
+        <AccountTabs />
+      </Suspense>
     </RequireAuth>
   );
 }

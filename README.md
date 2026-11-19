@@ -12,11 +12,16 @@ A full-stack spot crypto exchange: live markets, pro trading screen, an in-house
 |---|---|
 | Auth | Email/password signup, email verification, login, JWT session (httpOnly cookie), Google login, TOTP 2FA, password reset, sign out of all devices |
 | Markets | 12 USDT pairs with live price, 24h change/high/low/volume, search, sort, gainers/losers, favourites |
-| Trading | Candlestick chart (1m–1w) with live updates, live order book with depth bars (click a level to fill the price), market trades, Limit / Market / Stop-limit orders, open orders, order history, trade history, cancel / cancel all |
-| Matching engine | Price-time priority per pair, self-trade prevention, maker/taker fees, partial fills, price improvement refunds, stop triggers. A market-maker bot quotes 12 levels each side around the reference price and fills resting user orders when the market moves through them |
-| Wallet | Balances (available / in orders), USD valuation, portfolio pie chart, deposit addresses, instant demo deposits, withdrawal address whitelist, email-confirmed withdrawals, transaction history |
-| Account | Profile, KYC submission & status, 2FA setup, password change, HMAC-signed API keys (read / trade), activity log |
-| Admin | Stats dashboard, user search / freeze (cancels open orders) / balance adjustments, KYC approvals, withdrawal approvals, pair listing, enable/disable, fee config, audit log |
+| Trading | Candlestick chart (1m–1w) with live updates, depth chart, live order book with depth bars, price grouping and bids/asks views (click a level to fill the price), market trades, Limit / Market / Stop-limit / **OCO** / **Trailing-stop** orders, open orders, order history, trade history, cancel / cancel all, price alerts |
+| Matching engine | Price-time priority per pair, self-trade prevention, maker/taker fees, partial fills, price improvement refunds, stop and trailing triggers, OCO legs sharing one fund lock. A market-maker bot quotes 12 levels each side around the reference price and fills resting user orders when the market moves through them |
+| Fees | VIP tiers by 30-day volume (VIP 0–5, admin override), and an optional fee-discount token (`FEE_DISCOUNT_ASSET`, 25% off) |
+| Convert | Instant swap between any two assets with a 10-second guaranteed quote and zero fees (a spread is built into the rate) |
+| P2P | Buy and sell crypto for INR via UPI, IMPS, bank or Paytm. Merchant ads, escrow (crypto is locked until released), payment window with auto-cancel, in-order chat, mark-paid → release flow, disputes resolved by admins, completion-rate stats |
+| Wallet | Balances (available / in orders), USD valuation, portfolio pie chart, deposit addresses, instant demo deposits, withdrawal address whitelist, email-confirmed withdrawals, transaction history, CSV export |
+| Account | Profile, KYC submission & status, 2FA setup, password change, HMAC-signed API keys (read / trade), Fees & VIP, price alerts, activity log |
+| Sub-accounts | Up to 20 per user, instant internal transfers, switch into a sub-account to trade, freeze. Sub-accounts can't withdraw |
+| Platform | Notification center (bell + page, real-time), announcements, support tickets with staff replies, CSV statements (trades, orders, transactions, converts), English / हिन्दी / Español |
+| Admin | Stats dashboard, user search / freeze (cancels open orders) / balance adjustments / VIP override, KYC approvals, withdrawal approvals, P2P dispute resolution, support inbox, announcements, pair listing, enable/disable, fee config, audit log |
 | Security | bcrypt (12 rounds), Redis-backed rate limiting, CSRF double-submit token, zod validation on every endpoint, helmet headers, AES-256-GCM encrypted API secrets, audit logs, withdrawal whitelist + email confirmation + KYC gate + 2FA |
 
 ## Architecture
@@ -65,6 +70,7 @@ Open http://localhost:3000.
 |---|---|---|
 | admin@example.com | Admin@12345 | Admin (KYC approved) |
 | demo@example.com | Demo@12345 | User with 10k USDT, 0.1 BTC, 1 ETH |
+| merchant@example.com | Demo@12345 | P2P merchant with live buy and sell USDT ads |
 
 Without `RESEND_API_KEY`, emails (verification, password reset, withdrawal confirmation) are printed to the API console, so you can click the links locally.
 

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAuth, requireTrade } from '../lib/auth.js';
-import { cancelOrder, placeOrder } from '../engine/engine.js';
+import { cancelOrder, placeOco, placeOrder } from '../engine/engine.js';
 import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/errors.js';
 
@@ -12,13 +12,24 @@ const orderSchema = z
   .object({
     symbol: z.string().min(3).max(20),
     side: z.enum(['BUY', 'SELL']),
-    type: z.enum(['LIMIT', 'MARKET', 'STOP_LIMIT']),
+    type: z.enum(['LIMIT', 'MARKET', 'STOP_LIMIT', 'TRAILING_STOP']),
     quantity: num,
     price: num.optional(),
     stopPrice: num.optional(),
+    trailingDelta: num.optional(),
   })
   .refine((o) => o.type === 'MARKET' || !!o.price, { message: 'Price is required', path: ['price'] })
-  .refine((o) => o.type !== 'STOP_LIMIT' || !!o.stopPrice, { message: 'Stop price is required', path: ['stopPrice'] });
+  .refine((o) => o.type !== 'STOP_LIMIT' || !!o.stopPrice, { message: 'Stop price is required', path: ['stopPrice'] })
+  .refine((o) => o.type !== 'TRAILING_STOP' || !!o.trailingDelta, { message: 'Trailing delta is required', path: ['trailingDelta'] });
+
+const ocoSchema = z.object({
+  symbol: z.string().min(3).max(20),
+  side: z.enum(['BUY', 'SELL']),
+  quantity: num,
+  price: num,
+  stopPrice: num,
+  stopLimitPrice: num,
+});
 
 export const serializeOrder = (o: any) => ({
   ...o,
@@ -28,6 +39,7 @@ export const serializeOrder = (o: any) => ({
   filledQty: o.filledQty.toString(),
   quoteFilled: o.quoteFilled.toString(),
   lockPrice: undefined,
+  trailingDelta: o.trailingDelta?.toString() ?? null,
   avgPrice: o.filledQty.gt(0) ? o.quoteFilled.div(o.filledQty).toString() : null,
 });
 
@@ -37,6 +49,13 @@ export async function orderRoutes(app: FastifyInstance) {
     const order = await placeOrder(req.user!.id, body);
     await audit(req, req.user!.id, 'order.place', { id: order.id, symbol: order.symbol, side: order.side, type: order.type });
     return serializeOrder(order);
+  });
+
+  app.post('/api/orders/oco', { preHandler: requireTrade, config: { rateLimit: { max: 30, timeWindow: '10 seconds' } } }, async (req) => {
+    const body = ocoSchema.parse(req.body);
+    const r = await placeOco(req.user!.id, body);
+    await audit(req, req.user!.id, 'order.place_oco', { ocoId: r.ocoId, symbol: body.symbol, side: body.side });
+    return { ocoId: r.ocoId, orders: r.orders.map(serializeOrder) };
   });
 
   app.delete('/api/orders/:id', { preHandler: requireTrade }, async (req) => {
@@ -103,7 +122,7 @@ export async function orderRoutes(app: FastifyInstance) {
       return {
         id: t.id, symbol: t.symbol, side: isBuyer ? 'BUY' : 'SELL', price: t.price.toString(), quantity: t.quantity.toString(),
         quote: t.price.mul(t.quantity).toString(), fee: (isBuyer ? t.buyerFee : t.sellerFee).toString(),
-        feeAsset: isBuyer ? 'BASE' : 'QUOTE', role: isMaker ? 'MAKER' : 'TAKER', createdAt: t.createdAt,
+        feeAsset: (isBuyer ? t.buyerFeeAsset : t.sellerFeeAsset) ?? (isBuyer ? t.symbol.replace(/USDT$/, '') : 'USDT'), role: isMaker ? 'MAKER' : 'TAKER', createdAt: t.createdAt,
       };
     });
   });

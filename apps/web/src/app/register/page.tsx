@@ -6,10 +6,12 @@ import { AuthCard, FormError } from '@/components/AuthCard';
 import { Field } from '@/components/Field';
 import { api, errMsg } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useT } from '@/lib/i18n';
 
 export default function Register() {
   const router = useRouter();
   const { refresh, googleEnabled, tradingMode } = useAuth();
+  const { t } = useT();
   const [form, setForm] = useState({ name: '', email: '', password: '' });
   const [agree, setAgree] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,16 +40,16 @@ export default function Register() {
   };
 
   return (
-    <AuthCard title="Create your account" subtitle={tradingMode === 'paper' ? 'Get 10,000 demo USDT to start trading instantly.' : undefined}>
+    <AuthCard title={t('auth.register')} subtitle={tradingMode === 'paper' ? t('home.bonus') : undefined}>
       <form onSubmit={submit} className="space-y-4">
         <FormError error={error} />
-        <Field label="Name">
+        <Field label={t('auth.name')}>
           <input className="input" autoComplete="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </Field>
-        <Field label="Email">
+        <Field label={t('auth.email')}>
           <input className="input" type="email" autoComplete="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
         </Field>
-        <Field label="Password">
+        <Field label={t('auth.password')}>
           <input className="input" type="password" autoComplete="new-password" required value={pw} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         </Field>
         <div className="flex flex-wrap gap-2 text-xs">
@@ -57,14 +59,14 @@ export default function Register() {
         </div>
         <label className="flex items-start gap-2 text-sm text-muted">
           <input type="checkbox" className="mt-1" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-          I agree to the Terms of Service and Privacy Policy.
+          {t('auth.agree')}
         </label>
-        <button className="btn-brand w-full" disabled={busy || !agree || !checks.every((c) => c.ok)}>{busy ? 'Creating account…' : 'Create account'}</button>
+        <button className="btn-brand w-full" disabled={busy || !agree || !checks.every((c) => c.ok)}>{busy ? '…' : t('auth.createAccount')}</button>
         {googleEnabled && (
           <a href="/api/auth/google" className="btn-ghost w-full"><span className="font-bold">G</span> Sign up with Google</a>
         )}
         <p className="text-center text-sm text-muted">
-          Already have an account? <Link href="/login" className="text-brand hover:underline">Log in</Link>
+          {t('auth.have')} <Link href="/login" className="text-brand hover:underline">{t('auth.login')}</Link>
         </p>
       </form>
     </AuthCard>

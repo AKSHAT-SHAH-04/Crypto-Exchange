@@ -43,7 +43,8 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.get('/api/auth/me', async (req, reply) => {
     ensureCsrfCookie(req, reply);
-    return { user: req.user ? publicUser(req.user) : null, googleEnabled: !!config.googleClientId, tradingMode: config.tradingMode };
+    const actor = req.actorId ? await prisma.user.findUnique({ where: { id: req.actorId }, select: { email: true } }) : null;
+    return { user: req.user ? publicUser(req.user, actor) : null, googleEnabled: !!config.googleClientId, tradingMode: config.tradingMode };
   });
 
   app.post('/api/auth/register', strictLimit, async (req, reply) => {

@@ -22,6 +22,7 @@ enum OrderType {
   LIMIT
   MARKET
   STOP_LIMIT
+  TRAILING_STOP
 }
 
 enum OrderStatus {
@@ -38,6 +39,9 @@ enum TxType {
   WITHDRAWAL
   BONUS
   ADJUSTMENT
+  TRANSFER
+  P2P
+  CONVERT
 }
 
 enum TxStatus {
@@ -74,8 +78,24 @@ model User {
   totpEnabled     Boolean   @default(false)
   tokenVersion    Int       @default(0)
   kycStatus       KycStatus @default(NONE)
+  /// Pay trading fees with the discount token (FEE_DISCOUNT_ASSET) when possible
+  payFeesWithToken Boolean  @default(false)
+  /// Admin override for the VIP fee tier
+  vipOverride     Int?
+  /// Set for sub-accounts: the master account that owns this one
+  parentId        String?
+  subLabel        String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+
+  parent          User?     @relation("SubAccounts", fields: [parentId], references: [id], onDelete: Cascade)
+  subAccounts     User[]    @relation("SubAccounts")
+  notifications   Notification[]
+  alerts          PriceAlert[]
+  tickets         SupportTicket[]
+  converts        ConvertTrade[]
+  paymentMethods  P2PPaymentMethod[]
+  p2pAds          P2PAd[]
 
   balances        Balance[]
   orders          Order[]
@@ -137,12 +157,17 @@ model Order {
   quoteFilled Decimal     @default(0) @db.Decimal(36, 18)
   // Quote reserved per unit of base for BUY orders (limit price, or worst fill price for market buys)
   lockPrice   Decimal?    @db.Decimal(36, 18)
+  /// Links the two legs of an OCO order
+  ocoId       String?
+  /// Trailing stop callback rate as a fraction (0.01 = 1%)
+  trailingDelta Decimal?  @db.Decimal(10, 6)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
   user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, status])
   @@index([symbol, status])
+  @@index([ocoId])
 }
 
 model Trade {
@@ -157,6 +182,10 @@ model Trade {
   sellerId    String?
   buyerFee    Decimal   @default(0) @db.Decimal(36, 18)
   sellerFee   Decimal   @default(0) @db.Decimal(36, 18)
+  buyerFeeAsset  String?
+  sellerFeeAsset String?
+  /// Total fees collected on this trade, valued in USD at execution
+  feeUsd      Decimal   @default(0) @db.Decimal(36, 18)
   createdAt   DateTime  @default(now())
 
   @@index([symbol, createdAt])
@@ -264,4 +293,197 @@ model Favorite {
 model Setting {
   key   String @id
   value Json
+}
+
+// ---------------- Convert ----------------
+
+model ConvertTrade {
+  id         String   @id @default(cuid())
+  userId     String
+  fromAsset  String
+  toAsset    String
+  fromAmount Decimal  @db.Decimal(36, 18)
+  toAmount   Decimal  @db.Decimal(36, 18)
+  price      Decimal  @db.Decimal(36, 18)
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// ---------------- Alerts & notifications ----------------
+
+enum AlertDirection {
+  ABOVE
+  BELOW
+}
+
+model PriceAlert {
+  id          String         @id @default(cuid())
+  userId      String
+  symbol      String
+  direction   AlertDirection
+  price       Decimal        @db.Decimal(36, 18)
+  note        String?
+  active      Boolean        @default(true)
+  triggeredAt DateTime?
+  createdAt   DateTime       @default(now())
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([active])
+  @@index([userId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt])
+}
+
+model Announcement {
+  id        String   @id @default(cuid())
+  title     String
+  body      String
+  category  String   @default("General")
+  pinned    Boolean  @default(false)
+  published Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([published, createdAt])
+}
+
+// ---------------- Support ----------------
+
+enum TicketStatus {
+  OPEN
+  ANSWERED
+  CLOSED
+}
+
+model SupportTicket {
+  id        String          @id @default(cuid())
+  userId    String
+  subject   String
+  category  String
+  status    TicketStatus    @default(OPEN)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  TicketMessage[]
+
+  @@index([status, updatedAt])
+  @@index([userId])
+}
+
+model TicketMessage {
+  id        String        @id @default(cuid())
+  ticketId  String
+  authorId  String
+  staff     Boolean       @default(false)
+  body      String
+  createdAt DateTime      @default(now())
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+}
+
+// ---------------- P2P ----------------
+
+enum P2PSide {
+  BUY
+  SELL
+}
+
+enum P2PAdStatus {
+  ONLINE
+  OFFLINE
+  CLOSED
+}
+
+enum P2POrderStatus {
+  PENDING_PAYMENT
+  PAID
+  COMPLETED
+  CANCELED
+  DISPUTED
+}
+
+model P2PPaymentMethod {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String // UPI | BANK | IMPS | PAYTM
+  label     String
+  details   Json
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model P2PAd {
+  id           String      @id @default(cuid())
+  userId       String
+  /// Side from the advertiser's point of view
+  side         P2PSide
+  asset        String
+  fiat         String      @default("INR")
+  price        Decimal     @db.Decimal(36, 8)
+  totalAmount  Decimal     @db.Decimal(36, 18)
+  remaining    Decimal     @db.Decimal(36, 18)
+  minFiat      Decimal     @db.Decimal(36, 2)
+  maxFiat      Decimal     @db.Decimal(36, 2)
+  paymentTypes String[]
+  terms        String?
+  payWindowMin Int         @default(15)
+  status       P2PAdStatus @default(ONLINE)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders       P2POrder[]
+
+  @@index([status, side, asset])
+}
+
+model P2POrder {
+  id            String         @id @default(cuid())
+  adId          String
+  makerId       String
+  buyerId       String
+  sellerId      String
+  asset         String
+  fiat          String
+  price         Decimal        @db.Decimal(36, 8)
+  amount        Decimal        @db.Decimal(36, 18)
+  fiatAmount    Decimal        @db.Decimal(36, 2)
+  status        P2POrderStatus @default(PENDING_PAYMENT)
+  expiresAt     DateTime
+  paidAt        DateTime?
+  completedAt   DateTime?
+  cancelReason  String?
+  disputeReason String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  ad            P2PAd          @relation(fields: [adId], references: [id])
+  messages      P2PMessage[]
+
+  @@index([buyerId, createdAt])
+  @@index([sellerId, createdAt])
+  @@index([status])
+}
+
+model P2PMessage {
+  id        String   @id @default(cuid())
+  orderId   String
+  senderId  String?
+  system    Boolean  @default(false)
+  body      String
+  createdAt DateTime @default(now())
+  order     P2POrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
 }

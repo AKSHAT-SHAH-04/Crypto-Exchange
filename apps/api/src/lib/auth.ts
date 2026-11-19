@@ -15,6 +15,8 @@ declare module 'fastify' {
     user?: User;
     authVia?: 'session' | 'apikey';
     apiKeyCanTrade?: boolean;
+    /** Master account id when a master is operating one of its sub-accounts */
+    actorId?: string;
   }
 }
 
@@ -24,7 +26,7 @@ export function signJwt(sub: string, purpose: Purpose, extra: Record<string, unk
   return jwt.sign({ sub, purpose, ...extra }, config.jwtSecret, { expiresIn });
 }
 
-export function verifyJwt(token: string, purpose: Purpose): (jwt.JwtPayload & { sub: string; tv?: number }) | null {
+export function verifyJwt(token: string, purpose: Purpose): (jwt.JwtPayload & { sub: string; tv?: number; act?: string; atv?: number }) | null {
   try {
     const p = jwt.verify(token, config.jwtSecret) as jwt.JwtPayload;
     if (p.purpose !== purpose || typeof p.sub !== 'string') return null;
@@ -36,8 +38,9 @@ export function verifyJwt(token: string, purpose: Purpose): (jwt.JwtPayload & { 
 
 const cookieOpts = { path: '/', sameSite: 'lax' as const, secure: config.isProd };
 
-export function setSession(reply: FastifyReply, user: User) {
-  const token = signJwt(user.id, 'session', { tv: user.tokenVersion });
+/** Issues a session cookie. Pass `actor` when a master account switches into one of its sub-accounts. */
+export function setSession(reply: FastifyReply, user: User, actor?: User) {
+  const token = signJwt(user.id, 'session', { tv: user.tokenVersion, ...(actor ? { act: actor.id, atv: actor.tokenVersion } : {}) });
   reply.setCookie(SESSION_COOKIE, token, { ...cookieOpts, httpOnly: true, maxAge: SESSION_TTL_S });
 }
 
@@ -78,6 +81,12 @@ export async function resolveUser(req: FastifyRequest) {
   if (!payload) return;
   const user = await prisma.user.findUnique({ where: { id: payload.sub } });
   if (!user || user.tokenVersion !== payload.tv) return;
+  if (payload.act) {
+    // master operating a sub-account: master session must still be valid and own the sub
+    const actor = await prisma.user.findUnique({ where: { id: payload.act } });
+    if (!actor || actor.tokenVersion !== payload.atv || actor.frozen || user.parentId !== actor.id) return;
+    req.actorId = actor.id;
+  }
   req.user = user;
   req.authVia = 'session';
 }
@@ -103,8 +112,12 @@ export async function requireAdmin(req: FastifyRequest) {
   if (req.user!.role !== 'ADMIN') throw forbidden('Admins only');
 }
 
-export function publicUser(u: User) {
+export function publicUser(u: User, actor?: { email: string } | null) {
   return {
+    isSubAccount: !!u.parentId,
+    subLabel: u.subLabel,
+    actingFrom: actor?.email ?? null,
+    payFeesWithToken: u.payFeesWithToken,
     id: u.id,
     email: u.email,
     name: u.name,

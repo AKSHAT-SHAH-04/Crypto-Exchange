@@ -11,6 +11,8 @@ import { OrderForm } from '@/components/trade/OrderForm';
 import { UserOrders } from '@/components/trade/UserOrders';
 import { PairHeader } from '@/components/trade/PairHeader';
 import { MarketList } from '@/components/trade/MarketList';
+import { DepthChart } from '@/components/trade/DepthChart';
+import { useT } from '@/lib/i18n';
 import { brand, fmtPrice, fmtQty } from '@/lib/format';
 import type { BalanceRow } from '@/lib/types';
 
@@ -27,6 +29,8 @@ export default function TradePage({ params }: { params: { symbol: string } }) {
   const balances = useApi<{ balances: BalanceRow[] }>(user ? '/api/wallet/balances' : null, { refreshOnUserEvent: true });
   const [picked, setPicked] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<'chart' | 'book' | 'trades'>('chart');
+  const [chartView, setChartView] = useState<'candles' | 'depth'>('candles');
+  const { t } = useT();
 
   useUserEvents((ev) => {
     if (ev.type === 'fill') toast(`Order filled: ${ev.side.toLowerCase()} ${fmtQty(ev.qty)} ${ev.symbol} @ ${fmtPrice(ev.price)}`, 'success');
@@ -67,7 +71,16 @@ export default function TradePage({ params }: { params: { symbol: string } }) {
         </div>
         <div className="flex min-w-0 flex-col gap-2">
           <div className={clsx('card h-[380px] overflow-hidden lg:block lg:h-[440px]', mobileTab !== 'chart' && 'hidden')}>
-            <Chart symbol={symbol} price={ticker?.price} pricePrecision={market.pricePrecision} />
+            <div className="flex h-full flex-col">
+              <div className="flex gap-1 border-b border-line px-2 pt-1">
+                {(['candles', 'depth'] as const).map((v) => (
+                  <button key={v} onClick={() => setChartView(v)} className={clsx('tab py-1.5 text-xs', chartView === v && 'tab-active')}>{v === 'candles' ? t('trade.chart') : t('trade.depth')}</button>
+                ))}
+              </div>
+              <div className="min-h-0 flex-1">
+                {chartView === 'candles' ? <Chart symbol={symbol} price={ticker?.price} pricePrecision={market.pricePrecision} /> : <DepthChart depth={depth} market={market} />}
+              </div>
+            </div>
           </div>
           <div className="card">
             <OrderForm market={market} lastPrice={ticker?.price} pickedPrice={pickedPrice} baseAvail={avail.base} quoteAvail={avail.quote} />

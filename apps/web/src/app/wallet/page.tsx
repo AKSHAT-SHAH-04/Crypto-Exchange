@@ -12,6 +12,7 @@ import { useApi } from '@/lib/hooks';
 import { useAuth } from '@/lib/auth';
 import { fmt, fmtDateTime, fmtQty } from '@/lib/format';
 import type { Asset, BalanceRow, Tx } from '@/lib/types';
+import { useT } from '@/lib/i18n';
 
 const COLORS = ['#7c5cff', '#16c784', '#f59e0b', '#3b82f6', '#ec4899', '#14b8a6', '#a3a3a3'];
 
@@ -197,6 +198,7 @@ function WithdrawModal({ open, onClose, assets, balances, initial }: { open: boo
 }
 
 function Wallet() {
+  const { t } = useT();
   const toast = useToast();
   const { user, tradingMode } = useAuth();
   const welcome = useSearchParams().get('welcome');
@@ -248,14 +250,15 @@ function Wallet() {
       <div className="grid gap-4 md:grid-cols-[1fr_320px]">
         <div className="card p-6">
           <div className="flex items-center gap-2 text-sm text-muted">
-            Estimated balance
+            {t('wallet.estimated')}
             <button onClick={() => setHidden((h) => !h)} className="text-xs hover:text-fg">{hidden ? 'Show' : 'Hide'}</button>
           </div>
           <div className="num mt-2 text-3xl font-bold">{hidden ? '******' : `$${fmt(total, 2)}`}</div>
           <div className="mt-6 flex flex-wrap gap-2">
-            <button className="btn-brand" onClick={() => setModal({ kind: 'deposit' })}>Deposit</button>
-            <button className="btn-ghost" onClick={() => setModal({ kind: 'withdraw' })}>Withdraw</button>
-            <Link href="/trade/BTCUSDT" className="btn-ghost">Trade</Link>
+            <button className="btn-brand" onClick={() => setModal({ kind: 'deposit' })}>{t('wallet.deposit')}</button>
+            {!user?.isSubAccount && <button className="btn-ghost" onClick={() => setModal({ kind: 'withdraw' })}>{t('wallet.withdraw')}</button>}
+            <Link href="/convert" className="btn-ghost">{t('nav.convert')}</Link>
+            <Link href="/trade/BTCUSDT" className="btn-ghost">{t('nav.trade')}</Link>
           </div>
         </div>
         <div className="card flex items-center gap-3 p-4">
@@ -286,7 +289,7 @@ function Wallet() {
 
       <div className="card overflow-hidden">
         <div className="flex items-center border-b border-line px-4 py-3">
-          <h2 className="font-semibold">Assets</h2>
+          <h2 className="font-semibold">{t('wallet.assets')}</h2>
           <label className="ml-auto flex items-center gap-2 text-xs text-muted">
             <input type="checkbox" checked={hideSmall} onChange={(e) => setHideSmall(e.target.checked)} /> Hide balances under $1
           </label>
@@ -319,7 +322,10 @@ function Wallet() {
       </div>
 
       <div className="card overflow-hidden">
-        <h2 className="border-b border-line px-4 py-3 font-semibold">Transaction history</h2>
+        <h2 className="flex items-center border-b border-line px-4 py-3 font-semibold">
+          {t('wallet.history')}
+          <a href="/api/export/transactions" download className="ml-auto text-xs font-normal text-brand">{t('wallet.export')}</a>
+        </h2>
         <div className="max-h-[420px] overflow-auto">
           <table className="w-full min-w-[720px] text-xs">
             <thead>
@@ -328,18 +334,18 @@ function Wallet() {
               </tr>
             </thead>
             <tbody>
-              {txs.data?.map((t) => (
-                <tr key={t.id} className="border-b border-line/50 last:border-0">
-                  <td className="num px-4 py-2 text-muted">{fmtDateTime(t.createdAt)}</td>
-                  <td className="px-4">{t.type.toLowerCase()}</td>
-                  <td className="px-4 font-medium">{t.asset}</td>
-                  <td className={`num px-4 ${t.type === 'WITHDRAWAL' || +t.amount < 0 ? 'text-down' : 'text-up'}`}>{t.type === 'WITHDRAWAL' ? '-' : '+'}{fmtQty(Math.abs(+t.amount), 8)}</td>
-                  <td className="px-4 text-muted">{t.network ?? '—'}</td>
-                  <td className="num max-w-[200px] truncate px-4 text-muted" title={t.txHash || t.address || t.note || ''}>{t.txHash || t.address || t.note || '—'}</td>
-                  <td className="px-4"><StatusBadge status={t.status} /></td>
+              {txs.data?.map((tx) => (
+                <tr key={tx.id} className="border-b border-line/50 last:border-0">
+                  <td className="num px-4 py-2 text-muted">{fmtDateTime(tx.createdAt)}</td>
+                  <td className="px-4">{tx.type.toLowerCase()}</td>
+                  <td className="px-4 font-medium">{tx.asset}</td>
+                  <td className={`num px-4 ${tx.type === 'WITHDRAWAL' || +tx.amount < 0 ? 'text-down' : 'text-up'}`}>{tx.type === 'WITHDRAWAL' || +tx.amount < 0 ? '-' : '+'}{fmtQty(Math.abs(+tx.amount), 8)}</td>
+                  <td className="px-4 text-muted">{tx.network ?? '—'}</td>
+                  <td className="num max-w-[200px] truncate px-4 text-muted" title={tx.txHash || tx.address || tx.note || ''}>{tx.txHash || tx.address || tx.note || '—'}</td>
+                  <td className="px-4"><StatusBadge status={tx.status} /></td>
                   <td className="px-4 text-right">
-                    {t.type === 'WITHDRAWAL' && ['AWAITING_EMAIL', 'PENDING_APPROVAL'].includes(t.status) && (
-                      <button className="text-brand hover:underline" onClick={() => cancelWithdrawal(t.id)}>Cancel</button>
+                    {tx.type === 'WITHDRAWAL' && ['AWAITING_EMAIL', 'PENDING_APPROVAL'].includes(tx.status) && (
+                      <button className="text-brand hover:underline" onClick={() => cancelWithdrawal(tx.id)}>Cancel</button>
                     )}
                   </td>
                 </tr>

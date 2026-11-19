@@ -4,6 +4,8 @@ import './globals.css';
 import { AuthProvider } from '@/lib/auth';
 import { ToastProvider } from '@/components/Toast';
 import { Header } from '@/components/Header';
+import { Footer } from '@/components/Footer';
+import { I18nProvider } from '@/lib/i18n';
 
 const sans = Inter({ subsets: ['latin'], variable: '--font-sans' });
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono' });
@@ -19,12 +21,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body className="min-h-screen font-sans">
-        <AuthProvider>
-          <ToastProvider>
-            <Header />
-            <main>{children}</main>
-          </ToastProvider>
-        </AuthProvider>
+        <I18nProvider>
+          <AuthProvider>
+            <ToastProvider>
+              <Header />
+              <main className="min-h-[calc(100vh-200px)]">{children}</main>
+              <Footer />
+            </ToastProvider>
+          </AuthProvider>
+        </I18nProvider>
       </body>
     </html>
   );

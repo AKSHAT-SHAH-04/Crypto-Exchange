@@ -97,7 +97,7 @@ export async function walletRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/wallet/transactions', { preHandler: requireAuth }, async (req) => {
-    const q = z.object({ type: z.enum(['DEPOSIT', 'WITHDRAWAL', 'BONUS', 'ADJUSTMENT']).optional() }).parse(req.query);
+    const q = z.object({ type: z.enum(['DEPOSIT', 'WITHDRAWAL', 'BONUS', 'ADJUSTMENT', 'TRANSFER', 'P2P', 'CONVERT']).optional() }).parse(req.query);
     const rows = await prisma.transaction.findMany({
       where: { userId: req.user!.id, ...(q.type ? { type: q.type } : {}) },
       orderBy: { createdAt: 'desc' },
@@ -124,6 +124,7 @@ export async function walletRoutes(app: FastifyInstance) {
     const asset = await prisma.asset.findUnique({ where: { symbol: body.asset } });
     if (!asset || !asset.networks.includes(body.network)) throw badRequest('Unsupported asset/network');
     const u = req.user!;
+    if (u.parentId) throw forbidden('Sub-accounts cannot manage withdrawal addresses');
     if (u.totpEnabled && (!body.code || !authenticator.check(body.code, u.totpSecret!))) throw badRequest('Invalid 2FA code');
     const addr = await prisma.withdrawalAddress.create({
       data: { userId: u.id, asset: body.asset, network: body.network, address: body.address, label: body.label },
@@ -143,6 +144,7 @@ export async function walletRoutes(app: FastifyInstance) {
   app.post('/api/wallet/withdraw', { preHandler: requireSession, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
     const body = z.object({ addressId: z.string(), amount: z.string().regex(/^\d+(\.\d+)?$/), code: z.string().optional() }).parse(req.body);
     const u = req.user!;
+    if (u.parentId) throw forbidden('Sub-accounts cannot withdraw. Transfer funds to your main account first.');
     if (!u.emailVerified) throw forbidden('Verify your email before withdrawing');
     if (u.kycStatus !== 'APPROVED') throw forbidden('Complete identity verification (KYC) before withdrawing');
     if (u.totpEnabled && (!body.code || !authenticator.check(body.code, u.totpSecret!))) throw badRequest('Invalid 2FA code');

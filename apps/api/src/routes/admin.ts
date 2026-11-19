@@ -8,23 +8,30 @@ import { sha256 } from '../lib/crypto.js';
 import { adjustBalance, cancelAllForUser, listPairs, notifyUser, reloadPairs } from '../engine/engine.js';
 import { updateFeedPairs } from '../market/feed.js';
 import { serializePair } from './markets.js';
+import { notify } from '../lib/notify.js';
+import { invalidateFeeProfile } from '../engine/fees.js';
 
 export async function adminRoutes(app: FastifyInstance) {
-  app.addHook('preHandler', requireAdmin);
+  app.addHook('preHandler', async (req) => {
+    if (req.url.startsWith('/api/admin/')) await requireAdmin(req);
+  });
 
   app.get('/api/admin/stats', async () => {
     const dayAgo = new Date(Date.now() - 86400e3);
     const [users, newUsers, kycPending, withdrawalsPending, trades24h, openOrders] = await Promise.all([
-      prisma.user.count({ where: { role: 'USER' } }),
-      prisma.user.count({ where: { createdAt: { gte: dayAgo } } }),
+      prisma.user.count({ where: { role: 'USER', parentId: null } }),
+      prisma.user.count({ where: { role: 'USER', parentId: null, createdAt: { gte: dayAgo } } }),
       prisma.kycSubmission.count({ where: { status: 'PENDING' } }),
       prisma.transaction.count({ where: { type: 'WITHDRAWAL', status: 'PENDING_APPROVAL' } }),
       prisma.trade.count({ where: { createdAt: { gte: dayAgo } } }),
       prisma.order.count({ where: { status: { in: ['OPEN', 'PARTIALLY_FILLED', 'PENDING_TRIGGER'] } } }),
     ]);
-    const fees = await prisma.trade.findMany({ where: { createdAt: { gte: dayAgo } }, select: { symbol: true, price: true, buyerFee: true, sellerFee: true } });
-    const feesUsd = fees.reduce((s, t) => s + t.buyerFee.mul(t.price).plus(t.sellerFee).toNumber(), 0);
-    return { users, newUsers, kycPending, withdrawalsPending, trades24h, openOrders, feesUsd24h: feesUsd };
+    const [fees, p2pDisputes, openTickets] = await Promise.all([
+      prisma.trade.aggregate({ where: { createdAt: { gte: dayAgo } }, _sum: { feeUsd: true } }),
+      prisma.p2POrder.count({ where: { status: 'DISPUTED' } }),
+      prisma.supportTicket.count({ where: { status: 'OPEN' } }),
+    ]);
+    return { users, newUsers, kycPending, withdrawalsPending, trades24h, openOrders, feesUsd24h: fees._sum.feeUsd?.toNumber() ?? 0, p2pDisputes, openTickets };
   });
 
   // ---------- users ----------
@@ -34,7 +41,7 @@ export async function adminRoutes(app: FastifyInstance) {
       where: { role: { not: 'SYSTEM' }, ...(q ? { OR: [{ email: { contains: q, mode: 'insensitive' } }, { name: { contains: q, mode: 'insensitive' } }] } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 100,
-      select: { id: true, email: true, name: true, role: true, frozen: true, emailVerified: true, totpEnabled: true, kycStatus: true, createdAt: true },
+      select: { id: true, email: true, name: true, role: true, frozen: true, emailVerified: true, totpEnabled: true, kycStatus: true, vipOverride: true, parentId: true, createdAt: true },
     });
     return users;
   });
@@ -51,13 +58,14 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.patch('/api/admin/users/:id', async (req) => {
     const id = (req.params as any).id;
-    const body = z.object({ frozen: z.boolean().optional(), role: z.enum(['USER', 'ADMIN']).optional() }).parse(req.body);
+    const body = z.object({ frozen: z.boolean().optional(), role: z.enum(['USER', 'ADMIN']).optional(), vipOverride: z.number().int().min(0).max(5).nullable().optional() }).parse(req.body);
     if (id === req.user!.id) throw badRequest("You can't modify your own account here");
     const user = await prisma.user.update({
       where: { id },
       data: { ...body, ...(body.frozen ? { tokenVersion: { increment: 1 } } : {}) },
     });
     if (body.frozen) await cancelAllForUser(id);
+    if (body.vipOverride !== undefined) invalidateFeeProfile(id);
     await audit(req, req.user!.id, 'admin.user_updated', { target: id, ...body });
     return { ok: true, frozen: user.frozen, role: user.role };
   });
@@ -94,6 +102,12 @@ export async function adminRoutes(app: FastifyInstance) {
       prisma.user.update({ where: { id: sub.userId }, data: { kycStatus: body.decision } }),
     ]);
     await audit(req, req.user!.id, 'admin.kyc_reviewed', { submission: id, decision: body.decision });
+    await notify(sub.userId, {
+      type: 'kyc',
+      title: body.decision === 'APPROVED' ? 'Identity verified' : 'Identity verification rejected',
+      body: body.decision === 'APPROVED' ? 'Your KYC was approved. Withdrawals and P2P are now enabled.' : `Reason: ${body.note || 'not specified'}. You can resubmit.`,
+      link: '/account',
+    });
     return { ok: true };
   });
 
@@ -129,6 +143,12 @@ export async function adminRoutes(app: FastifyInstance) {
       return w;
     });
     await audit(req, req.user!.id, 'admin.withdrawal_reviewed', { id, decision: body.decision });
+    await notify(tx.userId, {
+      type: 'wallet',
+      title: body.decision === 'APPROVE' ? 'Withdrawal completed' : 'Withdrawal rejected',
+      body: `${tx.amount} ${tx.asset}${body.decision === 'REJECT' ? ` — funds returned to your wallet${body.note ? `. Reason: ${body.note}` : ''}` : ` sent to ${tx.address}`}`,
+      link: '/wallet',
+    });
     notifyUser(tx.userId);
     return { ok: true };
   });

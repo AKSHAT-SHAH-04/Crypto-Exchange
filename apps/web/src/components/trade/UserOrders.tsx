@@ -61,7 +61,11 @@ export function UserOrders({ symbol, full }: { symbol?: string; full?: boolean }
           <tr key={o.id} className="border-b border-line/50 last:border-0">
             <td className="num px-3 py-2 text-muted">{fmtDateTime(isOpen ? o.createdAt : o.updatedAt)}</td>
             <td className="px-3"><Link href={`/trade/${o.symbol}`} className="hover:text-brand">{o.symbol.replace('USDT', '/USDT')}</Link></td>
-            <td className="px-3">{o.type.replace('_', '-').toLowerCase()}</td>
+            <td className="px-3">
+              {o.type === 'TRAILING_STOP' ? 'trailing stop' : o.type.replace('_', '-').toLowerCase()}
+              {o.ocoId && <span className="ml-1 rounded bg-brand/15 px-1 text-[10px] text-brand">OCO</span>}
+              {o.trailingDelta && <span className="ml-1 text-[10px] text-muted">{(+o.trailingDelta * 100).toFixed(1)}%</span>}
+            </td>
             <td className={clsx('px-3 font-medium', o.side === 'BUY' ? 'text-up' : 'text-down')}>{o.side.toLowerCase()}</td>
             <td className="num px-3">{o.price ? fmtPrice(o.price) : 'Market'}</td>
             <td className="num px-3">{isOpen ? (o.stopPrice ? `${o.side === 'BUY' ? '≥' : '≤'} ${fmtPrice(o.stopPrice)}` : '—') : o.avgPrice ? fmtPrice(o.avgPrice) : '—'}</td>
@@ -90,6 +94,7 @@ export function UserOrders({ symbol, full }: { symbol?: string; full?: boolean }
             </label>
           )}
           {tab === 'open' && !!open.data?.length && <button onClick={cancelAll} className="text-brand hover:underline">Cancel all</button>}
+          {user && tab !== 'open' && <a href={`/api/export/${tab === 'history' ? 'orders' : 'trades'}`} download className="text-brand hover:underline">Export CSV</a>}
         </div>
       </div>
       <div className={clsx('overflow-auto', full ? 'min-h-[300px]' : 'h-[260px]')}>
@@ -118,7 +123,7 @@ export function UserOrders({ symbol, full }: { symbol?: string; full?: boolean }
                   <td className="num px-3">{fmtPrice(t.price)}</td>
                   <td className="num px-3">{fmtQty(t.quantity)}</td>
                   <td className="num px-3">{fmtPrice(t.quote, 2)}</td>
-                  <td className="num px-3 text-muted">{fmtQty(t.fee, 8)} {t.feeAsset === 'BASE' ? t.symbol.replace('USDT', '') : 'USDT'}</td>
+                  <td className="num px-3 text-muted">{fmtQty(t.fee, 8)} {t.feeAsset}</td>
                 </tr>
               ))}
             </tbody>
